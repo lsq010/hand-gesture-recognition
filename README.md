@@ -42,8 +42,8 @@
 ### 1. 克隆仓库
 
 ```bash
-git clone https://github.com/JiangYaxin/gesture-recognition.git
-cd gesture-recognition
+git clone https://github.com/lsq010/hand-gesture-recognition
+cd hand-gesture-recognition
 ```
 
 ### 2. 创建虚拟环境（推荐）
