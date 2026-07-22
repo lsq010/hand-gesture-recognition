@@ -1,0 +1,10 @@
+# 依赖包，建议在虚拟环境中安装
+# 安装命令：
+#   pip install -r requirements.txt
+
+# ── 核心依赖 ──
+mediapipe==0.10.14          # MediaPipe 手势识别（需锁定 0.10.14，新版移除 solutions API）
+opencv-python>=4.8          # 摄像头采集与图像处理
+numpy>=1.24                 # 数组运算
+Pillow>=10.0                # 中文文字渲染（cv2.putText 不支持中文）
+PySide6>=6.6                # GUI 界面框架

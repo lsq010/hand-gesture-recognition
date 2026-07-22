@@ -1,0 +1,27 @@
+# ── Python ──
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+
+# ── 虚拟环境 ──
+venv/
+.v1/
+
+# ── IDE ──
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ── 系统 ──
+.DS_Store
+Thumbs.db
+
+# ── 截图 / 日志导出文件（运行中生成，不建议入库） ──
+screenshot_*.png
+gesture_log_*.csv
