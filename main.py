@@ -72,12 +72,14 @@ class GestureApp(QWidget):
         self._last_right_gesture = ""
 
         # ── 截图缓存 ──
-        self._last_screenshot = None  # 存储截取的帧（numpy 数组）
+        self._last_screenshot = None   # BGR，供保存用
+        self._frozen = False            # 画面冻结标志
+        self._frozen_frame = None       # 冻结帧（RGB，供显示用）
 
         # ── 信号连接 ──
         self.ui.openCamButton.clicked.connect(self.open_camera)
         self.ui.closeCamButton.clicked.connect(self.close_camera)
-        self.ui.screenshotButton.clicked.connect(self.take_screenshot)
+        self.ui.screenshotButton.clicked.connect(self._on_screenshot_clicked)
         self.ui.saveButton.clicked.connect(self.save_screenshot)
         self.ui.exportButton.clicked.connect(self.export_log)
 
@@ -110,6 +112,10 @@ class GestureApp(QWidget):
         self.ui.openCamButton.setEnabled(False)
         self.ui.closeCamButton.setEnabled(True)
         self.ui.statusBar.setText("状态栏：摄像头运行中 | FPS: --")
+        # 恢复按钮状态（如果之前冻结过）
+        self._frozen = False
+        self._frozen_frame = None
+        self.ui.screenshotButton.setText("📷 截图")
 
     def close_camera(self):
         """关闭摄像头并停止定时器。"""
@@ -129,6 +135,11 @@ class GestureApp(QWidget):
 
         # 恢复结果占位
         self._reset_result_labels()
+
+        # 重置冻结状态
+        self._frozen = False
+        self._frozen_frame = None
+        self.ui.screenshotButton.setText("📷 截图")
 
         self.ui.openCamButton.setEnabled(True)
         self.ui.closeCamButton.setEnabled(False)
@@ -182,6 +193,25 @@ class GestureApp(QWidget):
     def _process_frame(self):
         """读取一帧 -> MediaPipe 识别 -> 绘制骨架 -> 更新 UI。"""
         if not self.running or self.cap is None:
+            return
+
+        # ── 冻结模式：持续显示冻结画面（支持窗口缩放自适应）──
+        if self._frozen and self._frozen_frame is not None:
+            h, w, ch = self._frozen_frame.shape
+            bytes_per_line = ch * w
+            q_img = QImage(
+                self._frozen_frame.data, w, h, bytes_per_line, QImage.Format.Format_RGB888
+            ).copy()
+            pixmap = QPixmap.fromImage(q_img)
+            self.ui.camLabel.setText("")
+            self.ui.camLabel.setStyleSheet("border: none; background-color: transparent;")
+            self.ui.camLabel.setPixmap(
+                pixmap.scaled(
+                    self.ui.camLabel.size(),
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+            )
             return
 
         ret, frame = self.cap.read()
@@ -299,10 +329,17 @@ class GestureApp(QWidget):
         # ── 更新状态栏 ──
         self.ui.statusBar.setText(f"状态栏：运行中 | FPS: {self._fps}")
 
+    def _on_screenshot_clicked(self):
+        """截图/继续按钮切换。"""
+        if self._frozen:
+            self._resume_feed()
+        else:
+            self.take_screenshot()
+
     # ── 截图 & 保存 & 导出 ─────────────────────────────────
 
     def take_screenshot(self):
-        """截取当前画面到内存（不弹保存对话框）。"""
+        """截取当前画面，冻结摄像头画面，按钮变为「继续」。"""
         if not self.running or self.cap is None:
             QMessageBox.warning(self, "提示", "请先打开摄像头。")
             return
@@ -315,14 +352,43 @@ class GestureApp(QWidget):
         if self.ui.mirrorCheck.isChecked():
             frame = cv2.flip(frame, 1)
 
-        self._last_screenshot = frame
+        # ── 如果开启手部骨架，在截图帧上绘制骨架 ──
+        if self.ui.drawSkeletonCheck.isChecked():
+            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            results = self.hands.process(rgb)
+            if results.multi_hand_landmarks:
+                for hand_lms in results.multi_hand_landmarks:
+                    self.mp_draw.draw_landmarks(
+                        rgb,
+                        hand_lms,
+                        self.mp_hands.HAND_CONNECTIONS,
+                        self.mp_draw.DrawingSpec(
+                            color=(0, 255, 255), thickness=2, circle_radius=4
+                        ),
+                        self.mp_draw.DrawingSpec(
+                            color=(255, 255, 255), thickness=2
+                        ),
+                    )
+            # 保存用 BGR，显示用 RGB
+            frame_bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+            self._last_screenshot = frame_bgr  # BGR，供保存用
+            self._frozen_frame = rgb             # RGB，供显示用
+        else:
+            self._last_screenshot = frame.copy()  # BGR，供保存用
+            self._frozen_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)  # RGB，供显示用
         self.ui.saveButton.setEnabled(True)
-        self.ui.statusBar.setText(
-            f"状态栏：截图已捕获，点击「保存」以存储文件 | FPS: {self._fps}"
-        )
+        self._frozen = True
+        self.ui.screenshotButton.setText("⏩ 继续")
+
+    def _resume_feed(self):
+        """恢复摄像头画面，按钮变回「截图」。"""
+        self._frozen = False
+        self._frozen_frame = None
+        self.ui.screenshotButton.setText("📷 截图")
+        self.ui.statusBar.setText(f"状态栏：运行中 | FPS: {self._fps}")
 
     def save_screenshot(self):
-        """将内存中的截图保存为图片文件。"""
+        """将内存中的截图保存为图片文件，保存后保持冻结状态。"""
         if self._last_screenshot is None:
             QMessageBox.warning(self, "提示", "没有可保存的截图，请先点击「截图」。")
             return
@@ -338,7 +404,7 @@ class GestureApp(QWidget):
         if file_path:
             cv2.imwrite(file_path, self._last_screenshot)
             self.ui.statusBar.setText(
-                f"状态栏：截图已保存至 {os.path.basename(file_path)} | FPS: {self._fps}"
+                f"状态栏：截图已保存至 {os.path.basename(file_path)} | 画面已冻结"
             )
 
     def export_log(self):
