@@ -2,7 +2,13 @@
 
 基于 MediaPipe 的实时手势识别系统，使用 PySide6 构建图形界面，支持双手同时识别、13种手势分类与手势方向检测。
 
-功能特性
+## 📺 效果演示
+
+<p align="center">
+  <img src="docs/hand-gesture-recognition.gif" alt="系统运行演示" width="85%">
+</p>
+
+## ✨ 功能特性
 
 | 功能 | 说明 |
 |------|------|
@@ -77,7 +83,8 @@ Windows 用户也可直接双击 `run_gui.bat`。
 ## 项目结构
 
 ```
-gesture-recognition/
+hand-gesture-recognition/
+├── docs/
 ├── main.py                    # 主程序（PySide6 GUI 控制器）
 ├── gesture_recognition.py     # 手势识别核心逻辑
 ├── rec.py                     # UI 代码（由 rec.ui 自动生成）
