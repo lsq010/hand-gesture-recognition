@@ -1,6 +1,6 @@
-# 🖐️ AI 手势识别系统
+# 🖐️ AI 手势多模态无障碍交流系统
 
-基于 MediaPipe 的实时手势识别系统，使用 PySide6 构建图形界面，支持双手同时识别、13种手势分类与手势方向检测。
+基于 **MediaPipe Hands** 的实时手势识别，结合 **YOLO-World** 物品检测、**Kimi / Moonshot** 大模型润色与 **ASR/TTS** 语音，构建了一套面向无障碍沟通的多模态桌面系统。使用 **PySide6** 打造深色仪表盘界面，支持双手同时识别、静态 + 动态手势、手势方向检测，并在「实时监测 / Kimi 对话 / 系统设置」三个标签页中完成识别 → 翻译 → 语音播报的完整闭环。
 
 ## 📺 效果演示
 
@@ -12,43 +12,65 @@
 
 | 功能 | 说明 |
 |------|------|
-| **实时识别** | 通过摄像头实时检测手势，30 FPS 流畅运行 |
-| **双手检测** | 同时识别左右手，右侧面板分栏显示结果 |
-| **13 种手势** | OK、握拳、张开手掌、点赞、拇指向下、指向、食指竖起、胜利、三指、四指、安静、打电话、比心 |
-| **手势含义** | 每个手势配有中文含义，显示在识别面板下方 |
-| **手势方向** | 检测手掌朝向（左/右/上/下/正中） |
-| **手部骨架** | 可开关的 21 关键点骨架绘制 |
-| **画面镜像** | 自拍视角镜像翻转 |
-| **截图保存** | 截图到内存后再保存，两步操作防止误存 |
-| **日志导出** | 手势变化时自动记录，支持 CSV 导出 |
-| **深色 UI** | 白色虚线边框 + 深色主题的现代化界面 |
+| **实时识别** | 摄像头实时检测手势，约 30 FPS 流畅运行 |
+| **双手检测** | `max_num_hands=2`，右侧面板分「左手 / 右手」两栏独立展示 |
+| **丰富手势** | 静态（握拳 / OK / 数字 1~5 / 点赞 / 拇指向下 / 指向 / 比心 / 打电话 / 双手比心）+ 动态（挥手 / 画圈 / 上下左右划）|
+| **手势含义** | 每个手势配中文语义，显示在识别面板下方 |
+| **手势方向** | 检测手掌朝向（↑ / ↓ / ← / → / ·） |
+| **动态手语** | 掌心轨迹滑动窗口识别 Wave / Circle / Swipe，结果浮动叠加在画面上 |
+| **物品检测** | YOLO-World 开放词汇检测（药瓶 / 药盒等），指向联动 |
+| **大模型润色** | 把「手势 + 指向物体 + 语音」结构化文本发给 Kimi，生成自然语句 |
+| **语音交互** | ASR 录音识别 + TTS 语音播报（可静音） |
+| **三标签页 UI** | 💬 Kimi 对话 / 🎯 实时监测（手势含义）/ ⚙ 系统设置 |
+| **手部骨架 / 镜像** | 可开关的 21 关键点骨架绘制、自拍镜像翻转 |
+| **数据持久化** | 识别历史自动写入 SQLite（logs 表），支持 CSV 导出 |
+| **配置持久化** | API Key / 骨架开关 / 镜像开关存入 SQLite（settings 表），重启自动恢复 |
+| **手势词典可编辑** | 含义存储在 SQLite（sign_dictionary 表），可经数据库修改无需改代码 |
+| **关闭回初始态** | 关闭摄像头后左侧画面自动回到纯黑，右侧标签回到占位状态 |
+| **帮助手册** | 内置「❓ 使用手册」弹窗，含快捷键、手势含义表与常见问题 |
+| **深色 UI** | 白色虚线边框 + 深色主题现代化界面 |
 
 ## 手势一览
 
+### 静态手势（单 / 双手）
+
 | 手势 | 名称 | 含义 |
 |------|------|------|
+| ✊ | 握拳 | 坚持 / 加油 / 力量 / 团结 |
 | 👍 | 点赞 | 赞赏 / 棒 / 同意 / 没问题 / 搞定 |
 | 👎 | 拇指向下 | 差劲 / 反对 / 不同意 / 否定 |
-| 👌 | OK | 好的 / 确定 / 没问题 |
-| ✌️ | 胜利 | 胜利 / 和平 / 数字2 |
-| 🖐️ | 张开手掌 | 停止 / 拒绝 / 稍等 |
-| ☝️ | 食指竖起 | 提示注意 / 稍等一下 / 数字1 |
-| 🤫 | 安静 | 保持安静 / 闭嘴 / 保密 |
-| 🤙 | 打电话 | 给我打电话 / 放松 / 酷 |
-| 🫰 | 比心 | 表达爱意 / 感谢 |
-| ✊ | 握拳 | 坚持 / 加油 / 力量 / 团结 |
+| 👌 | OK / 确认 | 好的 / 确定 / 没问题 |
+| ☝️ | 数字 1 | 提示注意 / 稍等一下 / 数字 1 |
+| ✌️ | 数字 2 | 胜利 / 和平 / 数字 2 |
+| 🖐️ | 数字 5 | 停止 / 拒绝 / 稍等 |
+| 👉 | 指向 | 指示方向 / 指向某物 |
+| 🫰 | 比心 | 爱你 / 喜欢 / 感谢（小） |
+| 🤙 | 打电话 | 联系我 / 打电话 / 呼叫 |
+| 🫶 | 双手比心 | 表达爱意 / 感谢（大） |
+| — | 数字 3 / 4 | 数字 3 / 数字 4 |
+
+> 注：👌=OK、✌️=数字 2、🖐️=数字 5、☝️=数字 1 在系统中以数字 / OK 形式识别并附带上表语义；👍/👎 由拇指朝向识别；🫰 比心 = 拇指尖与食指尖靠拢成小环；🤙 打电话 = 仅拇指 + 小指伸直；🫶 双手比心由双手食指尖 + 拇指尖靠拢判定。
+
+### 动态手语（SequenceTracker）
+
+| 动作 | 名称 | 说明 |
+|------|------|------|
+| 👋 | 挥手 Wave | 打招呼 / 再见（水平多次方向反转） |
+| ⭕ | 画圈 Circle | 强调 / 画圈（轨迹围合面积显著） |
+| ↔️ / ↕️ | 划动 Swipe | 向左 / 右 / 上 / 下 单向平移 |
 
 ## 环境要求
 
 - Python **3.9+**
-- Windows / Linux / macOS（支持摄像头）
+- Windows / Linux / macOS（需可用摄像头）
+- 联网（首次运行需下载 YOLO-World / CLIP 权重；Kimi 润色需 Moonshot API Key）
 
 ## 安装与运行
 
 ### 1. 克隆仓库
 
 ```bash
-git clone https://github.com/lsq010/hand-gesture-recognition
+git clone https://github.com/lsq010/hand-gesture-recognition.git
 cd hand-gesture-recognition
 ```
 
@@ -70,7 +92,12 @@ pip install -r requirements.txt
 
 > ⚠️ **注意**：`mediapipe` 版本必须锁定 `==0.10.14`，因为新版移除了 `solutions` API，本项目依赖该 API 进行手势识别。
 
-### 4. 运行
+### 4. 准备模型权重（物体检测 / CLIP）
+
+- **YOLO-World**：把 `yolov8s-world.pt` 放到项目根目录（已加入 `.gitignore`，不会随仓库提交，请自行保留）。
+- **CLIP 文本编码器**：首次运行物体检测时，`ultralytics` 会自动把 CLIP 权重下载到 `weights/clip/`（同样被 `.gitignore` 忽略，无需手动处理）。
+
+### 5. 运行
 
 ```bash
 python main.py
@@ -78,53 +105,94 @@ python main.py
 
 Windows 用户也可直接双击 `run_gui.bat`。
 
-按 **ESC** 键退出程序。
+- 启动后默认进入「⚙ 系统设置」标签页；点击「打开摄像头」会自动跳到「🎯 实时监测（手势含义）」页。
+- 按 **空格 / R** 录音并触发 Kimi 润色，按 **1 / 2** 切换预设场景，**ESC** 关闭弹窗。
+
+## 界面布局
+
+| 区域 | 说明 |
+|------|------|
+| 左侧 | 摄像头画面（实时叠加骨架、掌心轨迹、动态手势名）；关闭摄像头后回到纯黑 |
+| 顶部 | 「❓ 使用手册」按钮 + API Key 状态告警条 |
+| 右侧（Tab 1 💬） | Kimi 对话：识别结果展示、预设场景、发送按钮 |
+| 右侧（Tab 2 🎯） | 实时监测：左 / 右手势、手指数、方向、手势含义、环境物体 |
+| 右侧（Tab 3 ⚙） | 系统设置：开关（骨架 / 镜像）、数据记录（截图 / 导出）、识别历史（数据库）、API 与配置 |
+
+## 数据层（database.py）
+
+`database.py` 使用 SQLite（`app_data.db`，已 `.gitignore`）封装三张表，运行时自动建表：
+
+| 表 | 作用 |
+|----|------|
+| `logs` | 识别历史（手势 / 物体 / 翻译文本 / 时间戳），「系统设置 → 识别历史记录」可读出并导出 CSV |
+| `settings` | 键值配置（kimi_api_key / draw_skeleton / mirror 等），开关改动即时落盘，重启自动恢复 |
+| `sign_dictionary` | 手势英文标签 → 中文含义，首次运行从代码种子，之后以数据库为准（可编辑） |
+
+所有 CRUD 各自开关独立连接，线程安全，可在 UI 线程与 LLM 工作线程中直接调用。
 
 ## 项目结构
 
 ```
 hand-gesture-recognition/
-├── docs/
-├── main.py                    # 主程序（PySide6 GUI 控制器）
-├── gesture_recognition.py     # 手势识别核心逻辑
-├── rec.py                     # UI 代码（由 rec.ui 自动生成）
-├── rec.ui                     # Qt Designer UI 源文件
-├── check.png                  # 复选框蓝色对号图标
-├── requirements.txt           # Python 依赖
-├── setup.py                   # 包安装配置
-├── run_gui.bat                # Windows 快捷启动（GUI 版）
-├── run_gesture.bat            # Windows 快捷启动（终端版）
-├── .gitignore                 # Git 忽略规则
-├── LICENSE                    # MIT 许可证
-└── README.md                  # 项目说明（本文件）
+├── docs/                    # 演示 GIF 等文档资源
+├── main.py                  # 主程序（PySide6 GUI 控制器 / 程序入口）
+├── rec.py                   # UI 代码（由 rec.ui 自动生成，勿手改）
+├── rec.ui                   # Qt Designer UI 源文件
+├── vision_engine.py         # 视觉引擎：摄像头采集 + MediaPipe Hands
+├── gesture_classifier.py    # 静态手势几何判定（Fist/OK/Num_1~5/ThumbUp/ThumbDown/FingerHeart/Phone…）
+├── sequence_tracker.py      # 动态手语轨迹追踪（Wave/Circle/Swipe）
+├── object_detector.py       # YOLO-World 开放词汇物品检测
+├── llm_client.py            # Kimi / Moonshot API 客户端（结构化文本模式 + 规则兜底）
+├── asr_tts.py               # 语音：ASR 识别 + TTS 播报（edge-tts + pyttsx3）
+├── database.py              # SQLite 数据层（logs / settings / sign_dictionary）
+├── check.png                # 复选框图标
+├── requirements.txt         # Python 依赖
+├── run_gui.bat              # Windows 一键启动（GUI 版）
+├── test_phase_a.py          # 冒烟测试：vision_engine 单帧识别
+├── test_phase_b.py          # 冒烟测试：vision_engine + sequence_tracker 动态手势
+├── test_phase_c.py          # 冒烟测试：vision_engine + object_detector 物品检测
+├── test_phase_d.py          # 冒烟测试：asr_tts + llm_client
+├── .gitignore               # Git 忽略规则（含 weights/、yolov8s-world.pt、app_data.db）
+├── LICENSE                  # MIT 许可证
+└── README.md                # 项目说明（本文件）
 ```
+
+> 早期遗留文件（`gesture_recognition.py` 终端版、`multimodal_panel.py` 废弃面板、`gestures.db` 旧库、`setup.py` 无效打包、`run_gesture.bat`）已从仓库移除，不再维护。
 
 ## 技术说明
 
-- **手势识别**：基于 MediaPipe Hands 的 21 个手部关键点，通过指尖相对位置、指间距离、手指计数判断手势。
-- **图形界面**：使用 PySide6（Qt for Python）构建，QTimer 驱动帧循环，避免 `while True` 阻塞 UI。
+- **手势识别**：基于 MediaPipe Hands 的 21 个手部关键点，通过指尖相对位置、指间距离、手指计数判断静态手势；`SequenceTracker` 用掌心（Landmark 9）滑动窗口做动态手势识别。
+- **图形界面**：PySide6（Qt for Python），`QTimer` 驱动帧循环，避免 `while True` 阻塞 UI。
 - **中文渲染**：PIL（Pillow）绘制中文字体到画面，解决 OpenCV `putText` 不支持中文的问题。
+- **大模型接入**：本地算出「手势 + 指向物体 + 语音」的结构化文本描述，只发文字给 Kimi（省 token、低延迟），无 Key 时走规则兜底。
 - **双手逻辑**：`max_num_hands=2`，根据 MediaPipe 返回的 `handedness` 分配到左右手结果栏。
 
 ## 常见问题
 
-**Q: 摄像头明明捕获到了双手，但界面右侧只显示一只手的识别结果？**  
-A: 早期版本代码仅针对全局主手进行识别与逻辑渲染，未处理多手并发的数据结构。后续进行了代码重构，开启了 MediaPipe 的 `max_num_hands=2` 双手检测模式，并将界面右侧拆分为“左手”与“右手”两个独立展示栏，同时根据 `handedness` 属性分别分发数据，最终实现了双手同步识别与独立展示。
+**Q: 摄像头明明捕获到了双手，但界面右侧只显示一只手？**  
+A: 已开启 MediaPipe `max_num_hands=2` 双手检测，并将界面拆为「左手 / 右手」两栏按 `handedness` 分发，可同步识别。
 
 **Q: 运行报错 `No module named 'cv2'`？**  
-A: 虚拟环境未安装依赖，执行 `pip install -r requirements.txt`。
+A: 虚拟环境未装依赖，执行 `pip install -r requirements.txt`。
 
 **Q: 出现 `mediapipe has no attribute 'solutions'`？**  
 A: mediapipe 版本过高，执行 `pip install mediapipe==0.10.14`。
 
-**Q: 摄像头打开失败？**  
-A: 检查摄像头是否被其他程序占用，或尝试更换 USB 端口。
+**Q: Kimi 对话一直走规则兜底 / 提示未配置 Key？**  
+A: 在「⚙ 系统设置 → API 与配置」填入 Moonshot API Key 并点「保存配置」，或直接设置环境变量 `MOONSHOT_API_KEY`；保存后重启摄像头生效。
+
+**Q: 物体检测无反应？**  
+A: 确认根目录有 `yolov8s-world.pt`，且首次运行可联网（会自动下载 CLIP 权重到 `weights/clip/`）。
+
+**Q: 关闭摄像头后画面还停在上一张？**  
+A: 已修复——关闭摄像头会清空左侧画面回到纯黑，并重置右侧识别标签与业务状态。
 
 ## 🚀 改进方向 (Roadmap)
 
-- [ ] **丰富手势与手语库**：结合手部关节点与头部/面部动作，实现更复杂的多维度手势识别。
-- [ ] **实时手语翻译**：提升对连续动态手势的识别率，加入实时语音/文本翻译功能，助力无障碍沟通，为聋哑人士提供便捷。
-- [ ] **性能与模型优化**：引入轻量级自定义分类模型，进一步降低 CPU/GPU 占用，提高识别流畅度。
+- [ ] **丰富手势与手语库**：结合手部关节点与头部 / 面部动作，实现更复杂多维度的手势识别。
+- [ ] **实时手语翻译**：提升连续动态手势识别率，强化语音 / 文本翻译，助力无障碍沟通。
+- [ ] **性能与模型优化**：引入轻量级自定义分类模型，降低 CPU / GPU 占用。
+- [ ] **UI 词典编辑器**：在「系统设置」中提供图形化界面编辑 `sign_dictionary`，免改数据库。
 
 ## 许可证
 

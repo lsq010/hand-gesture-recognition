@@ -25,3 +25,12 @@ Thumbs.db
 # ── 截图 / 日志导出文件（运行中生成，不建议入库） ──
 screenshot_*.png
 gesture_log_*.csv
+
+# ── 模型权重 / 运行时缓存（自动下载或生成，不入库） ──
+# ultralytics 在首次物体检测时会自动下载 CLIP 权重到 weights/clip/
+weights/
+# YOLO-World 检测权重（27MB，请自行放置于项目根目录）
+yolov8s-world.pt
+# 运行时 SQLite 数据库（含用户历史记录与本地设置，含隐私数据）
+app_data.db
+*.db
