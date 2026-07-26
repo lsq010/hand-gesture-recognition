@@ -20,7 +20,7 @@ import cv2
 from PySide6.QtWidgets import (
     QApplication, QWidget, QGroupBox, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QLineEdit, QTextEdit, QTableWidget, QTableWidgetItem,
-    QTabWidget, QDialog, QDialogButtonBox, QScrollArea, QFrame,
+    QTabWidget, QDialog, QDialogButtonBox, QScrollArea, QFrame, QMessageBox,
 )
 from PySide6.QtCore import Qt, QTimer, QThread, Signal
 from PySide6.QtGui import QImage, QPixmap
@@ -257,6 +257,8 @@ class MainWindow(QWidget):
             "padding: 4px 10px; font-weight: bold;"
             "font-family: 'Microsoft YaHei', 'SimHei', sans-serif;"
         )
+        # 创建后立即刷新一次告警条（之前是在 _init_database 之前调用，那时标签还不存在，被 safe-return 掉了）
+        self._update_api_key_alert()
         self.apiKeyAlert.setVisible(False)  # 默认隐藏，初始化 LLM 后再决定
         top_row.addWidget(self.apiKeyAlert, stretch=1)
 
@@ -441,26 +443,105 @@ class MainWindow(QWidget):
             lambda v: save_setting("mirror", "1" if v else "0", "画面镜像")
         )
 
-        # 4) API Key 回填到输入框（不把明文打到日志）
-        saved_key = self.db_settings.get("kimi_api_key", "")
-        if saved_key:
-            self.apiKeyEdit.setText(saved_key)
+        # 4) API Key 仅活在内存：每次启动清空输入框 + 清掉 DB 历史残留 + 忽略 env
+        #    要求：每次打开都"干净"，必须由用户在本会话自行粘贴 Key
+        self.api_key = ""
+        try:
+            # 把之前误持久化的 kimi_api_key 置空/删除，保证 DB 也是干净的
+            save_setting("kimi_api_key", "", "Moonshot API Key（仅会话有效，重启即清空）")
+            self.db_settings["kimi_api_key"] = ""
+        except Exception:  # noqa: BLE001
+            pass
+        self.apiKeyEdit.clear()
+        self.apiKeyEdit.setPlaceholderText(
+            "粘贴 Moonshot API Key（仅本会话有效，重启后需重新输入）"
+        )
 
         # 5) 初次刷新历史列表
         self._refresh_history()
 
+    def _check_kimi_key_or_prompt(self) -> bool:
+        """Kimi 交流前的 Key 自检。
+        - 只有本次会话内用户在「系统设置」粘贴并保存的 self.api_key（≥ 20 字符）才算"已配置"。
+        - 故意忽略环境变量 MOONSHOT_API_KEY 与数据库：保证每次启动都是干净状态，
+          必须由用户自行粘贴 Key 才能跟 Kimi 对话。env 仍可供 test_phase_d 等
+          直接调用 llm_client 的脚本使用。
+        - 未配 self.api_key → 弹窗问用户是否去设置。
+            * 选「去配置」→ 跳到「系统设置」Tab 并把焦点给到 API Key 输入框，返回 False。
+            * 选「取消」→ 返回 False（不发送）。
+        调用方：send_chat() 在所有 Kimi 翻译路径（发送按钮/回车/场景1/2/语音→send_chat）前调用。
+        """
+        # 1) 只看本次会话内 self.api_key（用户在系统设置里粘贴 + 保存的 key）
+        session_key = (getattr(self, "api_key", "") or "").strip().strip('"\'').strip()
+        user_configured = (len(session_key) >= 20)
+        if user_configured:
+            return True
+
+        # 2) 状态文案
+        env_key = os.environ.get("MOONSHOT_API_KEY", "").strip().strip('"\'').strip()
+        if getattr(self, "llm", None) is None:
+            status = "llm_client 模块不可用"
+        elif env_key:
+            # 检测到环境变量残留，提醒用户去清理（GUI 不会自动放行）
+            status = (
+                "本次会话尚未粘贴 Moonshot Key "
+                f"（检测到环境变量 MOONSHOT_API_KEY 残留，长度 {len(env_key)}，"
+                "但 GUI 不读取 env；真机 PowerShell `Remove-Item Env:MOONSHOT_API_KEY` 可清理）"
+            )
+        else:
+            status = "未配置（请到「系统设置」→「🔑 API 与配置」粘贴 Key 后点「保存配置」，重启后会失效）"
+
+        # 3) 弹窗引导
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Warning)
+        box.setWindowTitle("未配置 Moonshot API Key")
+        box.setText(
+            "<h3 style='margin-top:0;'>与 Kimi 交流需要 API Key</h3>"
+            f"<p>当前状态：<b style='color:#c62828;'>{_esc(status)}</b></p>"
+            "<p>是否现在去「系统设置」添加？"
+            "<br/><span style='color:#888; font-size:12px;'>"
+            "（获取方式：登录 Moonshot 开放平台 → 控制台 → API Keys）</span></p>"
+        )
+        go_btn = box.addButton("去配置", QMessageBox.AcceptRole)
+        cancel_btn = box.addButton("取消", QMessageBox.RejectRole)
+        box.setDefaultButton(go_btn)
+        box.exec()
+        if box.clickedButton() is not go_btn:
+            # 用户取消
+            self.chatHistory.append(
+                "<span style='color:#ff9800;'>⚠ 已取消：未配置 API Key，无法与 Kimi 交流。"
+                "请到「系统设置」→「🔑 API 与配置」中粘贴 Key 后再试。</span>"
+            )
+            return False
+
+        # 4) 跳转到系统设置 Tab + 焦点给输入框 + 改 placeholder 提示
+        if hasattr(self, "rightTabs"):
+            self.rightTabs.setCurrentIndex(2)  # 系统设置 Tab
+        if hasattr(self, "apiKeyEdit"):
+            self.apiKeyEdit.setPlaceholderText(
+                "👉 请在这里粘贴 Moonshot API Key（sk-…），然后点「保存配置」"
+            )
+            self.apiKeyEdit.setFocus()
+        self.statusBar_show("请在「系统设置」中粘贴 Moonshot API Key，然后点「保存配置」")
+        return False
+
     def _save_config(self):
-        """把 API Key 输入框内容持久化到 settings 表。"""
-        if not HAS_DB:
-            self.statusBar_show("数据库模块不可用，无法保存配置")
+        """把 API Key 存到内存（self.api_key），重启即清空。
+        故意不写入数据库——按用户要求，每次打开应用都是干净状态，必须自行输入 Key。
+        """
+        if KimiLLMClient is None:
+            self.statusBar_show("llm_client 模块不可用，无法保存配置")
             return
-        key = self.apiKeyEdit.text().strip()
-        try:
-            save_setting("kimi_api_key", key, "Moonshot API Key")
-            self.db_settings["kimi_api_key"] = key
-            self.statusBar_show("✅ 配置已保存到数据库（下次开摄像头生效）")
-        except Exception as e:  # noqa: BLE001
-            self.statusBar_show(f"保存失败: {e}")
+        key = self.apiKeyEdit.text().strip().strip('"\'').strip()
+        self.api_key = key  # 只活在内存
+        # 显式传 api_key=key：key 为空时传 ""，llm_client 会视为"故意为空"，不读 env
+        self.llm = KimiLLMClient(api_key=key)
+        print(f">>> [Kimi] 已保存到当前会话，Key 长度={len(key)}")
+        self._update_api_key_alert()
+        if key:
+            self.statusBar_show("✅ Key 已保存到当前会话（重启后需重新输入）")
+        else:
+            self.statusBar_show("⚠ Key 为空，本次保存不会启用 Kimi 翻译")
 
     def _refresh_history(self):
         """从 logs 表读取最近记录并填充历史表格。"""
@@ -512,17 +593,20 @@ class MainWindow(QWidget):
     def _update_api_key_alert(self):
         if not hasattr(self, "apiKeyAlert"):
             return
-        if self.llm is None:
-            self.apiKeyAlert.setText("⚠ LLM 客户端不可用（缺少 llm_client.py）")
-            self.apiKeyAlert.setVisible(True)
-            return
+        # 实时算一遍 key 来源（仅看本次会话的 self.api_key）
+        session_key = (getattr(self, "api_key", "") or "").strip().strip('"\'').strip()
         try:
-            configured = self.llm.is_configured()
+            configured = bool(self.llm) and self.llm.is_configured()
         except Exception:  # noqa: BLE001
             configured = False
+        # 来源推断（GUI 不再读 env/db）
+        if session_key:
+            src = f"session({session_key[:4]}…{session_key[-4:]}, len={len(session_key)})"
+        else:
+            src = "未配置"
         if configured:
             self.apiKeyAlert.setText(
-                f"✅ Kimi 已配置：{getattr(self.llm, 'model', '')}"
+                f"✅ Kimi 已配置：{getattr(self.llm, 'model', '')} | 来源: {src}"
             )
             self.apiKeyAlert.setStyleSheet(
                 "color: #0d2b1a; background-color: #b6f0c2;"
@@ -531,7 +615,8 @@ class MainWindow(QWidget):
                 "font-family: 'Microsoft YaHei', 'SimHei', sans-serif;"
             )
         else:
-            self.apiKeyAlert.setText("⚠ 未配置 MOONSHOT_API_KEY，已走本地规则兜底")
+            # 未配置：无论 self.llm 是 None 还是空 key，都统一显示「缺少 Moonshot API Key」
+            self.apiKeyAlert.setText("⚠ 缺少 Moonshot API Key")
             self.apiKeyAlert.setStyleSheet(
                 "color: #2b2200; background-color: #ffd54a;"
                 "border: 1px solid #b58900; border-radius: 4px;"
@@ -600,10 +685,18 @@ class MainWindow(QWidget):
             return
     
         if KimiLLMClient is not None:
-            # 优先用 settings 表里的 kimi_api_key，其次退回到环境变量
-            api_key = self.db_settings.get("kimi_api_key") if HAS_DB else None
-            api_key = (api_key or "").strip() or os.environ.get("MOONSHOT_API_KEY", "")
-            self.llm = KimiLLMClient(api_key=api_key)
+            # 只用本次会话内 self.api_key（用户在系统设置里粘贴 + 保存）。
+            # 故意忽略 env 与 DB：保证每次打开应用都"干净"，必须由用户自行输入 Key。
+            session_key = (getattr(self, "api_key", "") or "").strip().strip('"\'').strip()
+            if len(session_key) >= 20:
+                final_key = session_key
+                key_src = "session"
+            else:
+                final_key = ""
+                key_src = "none"
+            # 显式传 api_key（final_key 为 "" 时 llm_client 视为"故意为空"，不读 env）
+            self.llm = KimiLLMClient(api_key=final_key)
+            print(f">>> [Kimi] API Key 来源={key_src}, 长度={len(final_key)}")
         if TTSManager is not None:
             self.tts = TTSManager()
         if ASRManager is not None:
@@ -826,6 +919,9 @@ class MainWindow(QWidget):
     def send_chat(self):
         text = self.chatInput.text().strip()
         if not text:
+            return
+        # === 守卫：未配置有效 Kimi Key 时引导去设置页 ===
+        if not self._check_kimi_key_or_prompt():
             return
         self.chatHistory.append(f"<b>你：</b>{_esc(text)}")
         self.chatInput.clear()
