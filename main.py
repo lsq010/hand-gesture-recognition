@@ -40,7 +40,15 @@ except ImportError:
 VisionEngine = None
 SequenceTracker = None
 ObjectDetector = None
-KimiLLMClient = None
+# llm_client 仅依赖 openai（轻量），启动时立即导入，
+# 这样用户无需打开摄像头即可在「系统设置」粘贴 Key 并与 Kimi 对话。
+# 其余重物（MediaPipe / YOLO-World / whisper / pygame）仍延迟到
+# CameraInitWorker 后台线程首次 import，保证启动 ~2s 不卡。
+try:
+    from llm_client import KimiLLMClient
+except Exception as _llm_err:  # noqa: BLE001
+    KimiLLMClient = None
+    print(f">>> [LLM] llm_client 模块不可用，Kimi 对话将关闭: {_llm_err}")
 ASRManager = None
 TTSManager = None
 try:
@@ -307,31 +315,29 @@ class CameraInitWorker(QThread):
 
 
 class ChatWorker(QThread):
-    """在子线程里调用 Kimi，避免阻塞 UI。"""
+    """在子线程里调用 Kimi 进行对话，避免阻塞 UI。
 
-    done = Signal(str, str)   # translated_text, intent
+    Kimi 只做普通对话交流：直接回答用户输入的问题，
+    不再做「手势+物体+语音 → 一句话」的多模态润色。
+    """
+
+    done = Signal(str, str)   # reply_text, intent
     error = Signal(str)
 
-    def __init__(self, llm, gestures, objects, text):
+    def __init__(self, llm, text):
         super().__init__()
         self.llm = llm
-        self.gestures = gestures
-        self.objects = objects
         self.text = text
 
     def run(self):
         try:
             if self.llm is None:
-                self.done.emit("（LLM 客户端未配置，请设置 MOONSHOT_API_KEY）", "Error")
+                self.done.emit("（LLM 客户端未配置，请到「系统设置」保存 API Key）", "Error")
                 return
-            res = self.llm.translate_context(
-                gestures=self.gestures,
-                objects=self.objects,
-                asr_text=self.text,
-            )
+            res = self.llm.chat(text=self.text)
             self.done.emit(
-                res.get("translated_text", ""),
-                res.get("intent", "Unknown"),
+                res.get("text", ""),
+                res.get("intent", "对话"),
             )
         except Exception as e:  # noqa: BLE001
             self.error.emit(str(e))
@@ -387,12 +393,12 @@ class MainWindow(QWidget):
         # 窗口最小宽度撑大，启动时出现文字挤压或控件遮盖。
 
         # === 1) 先把 rec.ui 默认塞进 rightPanelLayout 的 4 个 GroupBox 全部取出 ===
-        preset_widgets = []
+        taken_widgets = []
         while right.count():
             item = right.takeAt(0)
             w = item.widget() if item is not None else None
             if w is not None:
-                preset_widgets.append(w)
+                taken_widgets.append(w)
 
         # 按对象身份分桶（不依赖标题文本，避免 ui 里改了文案就对不上）
         control_g = self.ui.controlGroup
@@ -475,14 +481,6 @@ class MainWindow(QWidget):
         chat_layout.addLayout(input_row)
 
         tab_chat_layout.addWidget(self.chatGroup, stretch=3)
-
-        # 演示预设（无摄像头时也能演示全链路）
-        preset_row = QHBoxLayout()
-        self.preset1Button = QPushButton("场景1: 指向+药瓶")
-        self.preset2Button = QPushButton("场景2: 挥手+早上好")
-        preset_row.addWidget(self.preset1Button)
-        preset_row.addWidget(self.preset2Button)
-        tab_chat_layout.addWidget(_wrap_in_group("🧪 演示预设", preset_row))
 
         tab_chat_layout.addStretch(1)
         self.rightTabs.addTab(tab_chat, "💬 Kimi 对话")
@@ -569,10 +567,6 @@ class MainWindow(QWidget):
         self.saveConfigButton = QPushButton("保存配置")
         self.saveConfigButton.clicked.connect(self._save_config)
         cfg_btn_row.addWidget(self.saveConfigButton)
-        self.testKeyButton = QPushButton("🔍 检测 Key 是否可用")
-        self.testKeyButton.setToolTip("向 Moonshot 发送最小测试请求，验证 Key 是否有效")
-        self.testKeyButton.clicked.connect(self._test_kimi_key)
-        cfg_btn_row.addWidget(self.testKeyButton)
         cfg_btn_row.addStretch(1)
         cfg_layout.addLayout(cfg_btn_row)
         tab_sys_layout.addWidget(cfg_group)
@@ -655,7 +649,7 @@ class MainWindow(QWidget):
         - 未配 self.api_key → 弹窗问用户是否去设置。
             * 选「去配置」→ 跳到「系统设置」Tab 并把焦点给到 API Key 输入框，返回 False。
             * 选「取消」→ 返回 False（不发送）。
-        调用方：send_chat() 在所有 Kimi 翻译路径（发送按钮/回车/场景1/2/语音→send_chat）前调用。
+        调用方：send_chat() 在发送按钮 / 回车 / 语音转写 → send_chat 前调用。
         """
         # 1) 只看本次会话内 self.api_key（用户在系统设置里粘贴 + 保存的 key）
         session_key = (getattr(self, "api_key", "") or "").strip().strip('"\'').strip()
@@ -665,7 +659,7 @@ class MainWindow(QWidget):
 
         # 2) 状态文案
         env_key = os.environ.get("MOONSHOT_API_KEY", "").strip().strip('"\'').strip()
-        if getattr(self, "llm", None) is None:
+        if KimiLLMClient is None:
             status = "llm_client 模块不可用"
         elif env_key:
             # 检测到环境变量残留，提醒用户去清理（GUI 不会自动放行）
@@ -714,89 +708,109 @@ class MainWindow(QWidget):
     def _save_config(self):
         """把 API Key 存到内存（self.api_key），重启即清空。
         故意不写入数据库——按用户要求，每次打开应用都是干净状态，必须自行输入 Key。
+
+        保存前自动检测 Key 是否可用：
+        - Key 为空 → 直接保存（清除配置）
+        - Key 检测通过 → 保存
+        - Key 检测 401 → 不保存，提示「Key 错误」
+        - Key 检测其他异常 → 询问是否仍要保存
         """
         if KimiLLMClient is None:
             self.statusBar_show("llm_client 模块不可用，无法保存配置")
             return
         key = self.apiKeyEdit.text().strip().strip('"\'').strip()
-        self.api_key = key  # 只活在内存
-        # 显式传 api_key=key：key 为空时传 ""，llm_client 会视为"故意为空"，不读 env
-        self.llm = KimiLLMClient(api_key=key)
-        print(f">>> [Kimi] 已保存到当前会话，Key 长度={len(key)}")
-        self._update_api_key_alert()
-        if key:
-            self.statusBar_show("✅ Key 已保存到当前会话（重启后需重新输入）")
-        else:
-            self.statusBar_show("⚠ Key 为空，本次保存不会启用 Kimi 翻译")
 
-    # ------------------------------------------------------------------ #
-    #  检测 Key：向 Moonshot 发一个最小请求，验证 Key 是否可用
-    # ------------------------------------------------------------------ #
-    def _test_kimi_key(self):
-        """点「🔍 检测 Key 是否可用」时调用：
-        - 取输入框里的 Key（不污染 self.api_key，只验证不入库）
-        - 在子线程里向 Moonshot 发最小 chat completion（防 GUI 卡顿）
-        - 根据结果弹 ✅ 成功 / ❌ 失败 弹窗，并提示具体原因（401/429/网络/未知）
-        """
-        if KimiLLMClient is None:
-            QMessageBox.critical(self, "检测失败", "llm_client 模块不可用，无法检测 Key。")
-            return
-        key = self.apiKeyEdit.text().strip().strip('"\'').strip()
+        # Key 为空 → 直接清除配置
         if not key:
-            QMessageBox.warning(
-                self,
-                "缺少 Key",
-                "请先在输入框粘贴 Moonshot API Key，再点「🔍 检测 Key 是否可用」。"
-            )
-            self.apiKeyEdit.setFocus()
+            self.api_key = ""
+            self.llm = KimiLLMClient(api_key="")
+            self._update_api_key_alert()
+            self.statusBar_show("⚠ Key 已清空，Kimi 对话将关闭")
             return
+
+        # Key 长度异常 → 提示但不保存
         if len(key) < 20:
             QMessageBox.warning(
                 self,
                 "Key 长度异常",
                 f"当前 Key 仅 {len(key)} 个字符，正常 Moonshot Key 通常 ≥ 30 字符。\n"
-                "可能是复制时被截断，或夹带了多余字符。"
+                "可能是复制时被截断，或夹带了多余字符。",
             )
             return
 
-        # 禁用按钮，防止重复点击
-        self.testKeyButton.setEnabled(False)
-        original_text = self.testKeyButton.text()
-        self.testKeyButton.setText("🔍 检测中...")
-        self.statusBar_show("正在向 Moonshot 发送最小测试请求...")
+        # 保存前先检测 Key 是否可用（复用 _KeyTestWorker 子线程）
+        self._pending_save_key = key
 
-        # 启动 QThread 异步检测（避免 GUI 卡 1~3 秒）
+        self.saveConfigButton.setEnabled(False)
+        self._save_btn_original_text = self.saveConfigButton.text()
+        self.saveConfigButton.setText("💾 检测中...")
+        self.statusBar_show("正在检测 Key 是否可用，通过后自动保存...")
+
         self._test_kimi_thread = _KeyTestWorker(key, parent=self)
         self._test_kimi_thread.result.connect(self._on_kimi_key_tested)
         self._test_kimi_thread.finished.connect(
             lambda: (
-                self.testKeyButton.setEnabled(True),
-                self.testKeyButton.setText(original_text),
+                self.saveConfigButton.setEnabled(True),
+                self.saveConfigButton.setText(getattr(self, "_save_btn_original_text", "保存配置")),
             )
         )
         self._test_kimi_thread.start()
 
     def _on_kimi_key_tested(self, ok: bool, message: str):
-        """子线程回调：弹成功/失败弹窗。"""
+        """保存配置时子线程检测 Key 的回调。
+        - ok=True  → Key 可用，存入内存，弹「✅ 保存成功」
+        - ok=False + 401 → Key 错误，不保存，弹「❌ Key 错误」+ 失败原因
+        - ok=False + 其他 → 网络/限流等临时问题，询问是否仍要保存
+        """
         if ok:
+            key = self._pending_save_key
+            self.api_key = key
+            self.llm = KimiLLMClient(api_key=key)
+            self._update_api_key_alert()
+            print(f">>> [Kimi] 已保存到当前会话，Key 长度={len(key)}")
+            self.statusBar_show("✅ Key 可用，已保存到当前会话（重启后需重新输入）")
             QMessageBox.information(
                 self,
-                "✅ Key 可用",
-                f"Moonshot Key 检测通过！\n\n服务器返回：{message}",
+                "✅ Key 可用，保存成功",
+                f"Key 检测通过，已保存到当前会话！\n\n服务器返回：{message}",
             )
-            self.statusBar_show("✅ Key 检测通过")
-        else:
+            return
+
+        # 失败：判断是否 401 认证错误（Key 本身不对）
+        is_auth_error = (
+            "401" in message
+            or "认证失败" in message
+            or "invalid_api_key" in message.lower()
+        )
+
+        if is_auth_error:
             QMessageBox.critical(
                 self,
-                "❌ Key 不可用",
-                f"Moonshot Key 检测失败。\n\n原因：{message}\n\n"
-                "可能原因：\n"
-                "① Key 复制不完整（含空格/换行/引号残留）；\n"
-                "② Key 已过期或在 Moonshot 控制台被撤销；\n"
-                "③ 账号未开通 API 访问 / 余额不足 / 触发限流；\n"
-                "④ 网络问题导致请求失败。",
+                "❌ Key 错误",
+                f"Key 不可用，未保存。\n\n失败原因：{message}\n\n"
+                "请检查 Key 是否正确后重新输入，再点「保存配置」。",
             )
-            self.statusBar_show(f"❌ Key 检测失败: {message}")
+            self.statusBar_show(f"❌ Key 错误，未保存: {message}")
+        else:
+            # 非 401（网络/限流等临时问题）：询问是否仍要保存
+            reply = QMessageBox.question(
+                self,
+                "Key 检测异常",
+                f"Key 检测未通过，但可能是网络或限流等临时问题。\n\n"
+                f"失败原因：{message}\n\n"
+                "是否仍要保存此 Key？",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes,
+            )
+            if reply == QMessageBox.Yes:
+                key = self._pending_save_key
+                self.api_key = key
+                self.llm = KimiLLMClient(api_key=key)
+                self._update_api_key_alert()
+                print(f">>> [Kimi] 已保存到当前会话（检测异常），Key 长度={len(key)}")
+                self.statusBar_show("⚠ Key 已保存（检测异常，可能无法使用）")
+            else:
+                self.statusBar_show("❌ 已取消保存")
 
     def _refresh_history(self):
         """从 logs 表读取最近记录并填充历史表格。
@@ -920,13 +934,7 @@ class MainWindow(QWidget):
         self.sendButton.clicked.connect(self.send_chat)
         self.chatInput.returnPressed.connect(self.send_chat)
         self.voiceButton.clicked.connect(self.start_voice_input)
-        self.preset1Button.clicked.connect(
-            lambda: self.apply_preset(["指向"], ["药瓶", "水杯"], "帮我拿一下")
-        )
-        self.preset2Button.clicked.connect(
-            lambda: self.apply_preset(["挥手/再见"], [], "早上好")
-        )
-    
+
         self.helpButton.clicked.connect(self._show_help_dialog)
     
     # ------------------------------------------------------------------ #
@@ -979,7 +987,10 @@ class MainWindow(QWidget):
                     pass
             return
         self.obj = obj
-        self.llm = llm
+        # 仅当后台确实创建了 LLM 客户端时才覆盖；避免用户在开摄像头前
+        # 已自行配置 Key 创建的 self.llm 被 None 清掉。
+        if llm is not None:
+            self.llm = llm
         self.tts = tts
         self.asr = asr
         self._update_api_key_alert()  # 顶部告警条按 LLM 状态显示/隐藏
@@ -1226,9 +1237,7 @@ class MainWindow(QWidget):
         self.sendButton.setEnabled(False)
         self.voiceButton.setEnabled(False)
     
-        self._worker = ChatWorker(
-            self.llm, self.current_gestures, self.current_objects, text
-        )
+        self._worker = ChatWorker(self.llm, text)
         # 捕获发送时刻的上下文，供翻译完成后写入历史（避免完成时被新帧覆盖）
         self._pending_log_ctx = (list(self.current_gestures), list(self.current_objects))
         self._worker.done.connect(self._on_chat_done)
@@ -1293,15 +1302,7 @@ class MainWindow(QWidget):
         if objects:
             parts.append("场景：" + "、".join(objects))
         return " ｜ ".join(parts)
-    def apply_preset(self, gestures, objects, text):
-        # 演示预设：手动设置当前生效输入（摄像头未开时不会被 _tick 覆盖）
-        self.current_gestures = list(gestures)
-        self.current_objects = list(objects)
-        self.ui.leftGestureLabelValue.setText(gestures[0] if gestures else "未检测")
-        self.envLabelValue.setText("、".join(objects) or "无")
-        self.chatInput.setText(text)
-        self.send_chat()
-    
+
     def start_voice_input(self):
         if self.asr is None:
             self.chatHistory.append(
@@ -1385,18 +1386,10 @@ class MainWindow(QWidget):
         super().closeEvent(event)
     
     def keyPressEvent(self, event):
-        """全局快捷键：R=录音，1=场景1，2=场景2，Esc=关闭弹窗。"""
+        """全局快捷键：R=录音，Esc=关闭弹窗。"""
         k = event.key()
         if k == Qt.Key_R:
             self.start_voice_input()
-            return
-        if k == Qt.Key_1:
-            if hasattr(self, "preset1Button"):
-                self.preset1Button.click()
-            return
-        if k == Qt.Key_2:
-            if hasattr(self, "preset2Button"):
-                self.preset2Button.click()
             return
         if k == Qt.Key_Escape:
             # 若有模态弹窗，由 Qt 自己关闭；否则透传给父类
@@ -1418,7 +1411,7 @@ class HelpDialog(QDialog):
       <p>AI 手势识别系统 · 多模态无障碍交流终端。<br>
       通过 <b>摄像头</b> + <b>语音</b> + <b>键盘</b> 三种通道，
       借助 <b>MediaPipe</b>（静态/动态手势）、<b>YOLO-World</b>（开放词汇物品）、
-      <b>Kimi / Moonshot</b>（中文润色与意图理解）、
+      <b>Kimi / Moonshot</b>（对话与意图理解）、
       <b>Edge-TTS</b>（语音播报），
       把手势、指向、物体、语音转成自然语言并播报，帮助听障 / 言语障碍人士与外界交流。</p>
 
@@ -1427,7 +1420,6 @@ class HelpDialog(QDialog):
              style="border-collapse: collapse;">
         <tr><td><b>Space</b></td><td>在 Kimi 对话 Tab 内：发送当前输入框文字</td></tr>
         <tr><td><b>R</b></td><td>开始 4 秒录音 → ASR 听写 → 自动填入输入框并发送</td></tr>
-        <tr><td><b>1 / 2</b></td><td>触发演示场景 1（指向+药瓶）/ 场景 2（挥手+早上好）</td></tr>
         <tr><td><b>Esc</b></td><td>关闭弹窗 / 退出程序</td></tr>
       </table>
 
@@ -1450,7 +1442,7 @@ class HelpDialog(QDialog):
 
       <h3 style="color:#4a9eff;">🖐 手势触发</h3>
       <ul>
-        <li><b>双手比心 (❤) 定格 1.5 秒</b>：触发一次 Kimi 润色（结合当前手势/物体/语音）</li>
+        <li><b>双手比心 (❤) 定格 1.5 秒</b>：触发一次 Kimi 对话（把当前手势/物体/语音作为上下文一并发送）</li>
         <li><b>挥手 / 画圈 / 上划 / 下划 / 左划 / 右划</b>：动态手语，优先级高于静态手势</li>
         <li><b>指向</b>：手腕→食指尖射线，结合 YOLO 框选命中物体</li>
       </ul>
@@ -1465,8 +1457,10 @@ class HelpDialog(QDialog):
 
       <h3 style="color:#4a9eff;">❓ 常见问题</h3>
       <ul>
-        <li>顶部黄色 Alert：未配置 <code>MOONSHOT_API_KEY</code> 时显示，回复走本地规则兜底，不影响使用。</li>
+        <li>顶部黄色 Alert：本次会话尚未在「系统设置」粘贴并保存 Moonshot API Key 时显示。Key 仅存于内存、重启后失效，需重新输入。</li>
+        <li>保存配置会自动检测 Key：通过才保存；若返回 401 则提示「Key 错误」并拒绝保存。</li>
         <li>语音按钮灰：未打开摄像头或未安装 <code>faster-whisper</code>。</li>
+        <li>无需打开摄像头即可与 Kimi 文字对话——只要先在「系统设置」保存有效 Key。</li>
         <li>点击「❓ 使用手册」可随时再次打开本窗口。</li>
       </ul>
     </div>
