@@ -2,7 +2,7 @@
 # 安装命令：
 #   pip install -r requirements.txt
 
-# ── 现有核心依赖（保持）──
+# ── 核心依赖 ──
 # MediaPipe 手势识别（锁定 0.10.14，新版移除了 solutions API）
 mediapipe==0.10.14
 
@@ -12,36 +12,27 @@ opencv-python>=4.8.0
 # 数组运算（限制 <2.0 防止与 MediaPipe C 扩展冲突）
 numpy>=1.24.0,<2.0.0
 
-# 中文文字渲染（cv2.putText 不支持中文）
+# 中文文字渲染（Pillow；主程序 PIL 中文叠加时使用）
 Pillow>=10.0.0
 
 # GUI 界面框架
 PySide6>=6.6.0
 
-# ── 新增：多模态升级依赖 ──
-# YOLO 物体检测（开放词汇 / YOLO-World）
+# ── 多模态升级依赖 ──
+# YOLO-World 物体检测（开放词汇；会随依赖自动安装 torch / torchvision）
 ultralytics
 
-# Kimi K2.6 大模型（OpenAI 兼容 API）
+# Kimi / Moonshot 大模型（OpenAI 兼容 API）
 openai
 
-# 在线 TTS（可静音开关）
+# 在线 TTS 语音播报（生成的 mp3 由 pygame mixer 播放）
 edge-tts
 
-# 离线 TTS 备选
-pyttsx3
-
-# ASR 语音识别（Faster-Whisper 按需加载，CPU INT8 量化）
-faster-whisper
-
-# 实时麦克风录音（main.py 按 'r' 录 4s 交给 faster-whisper 听写）
-sounddevice
-
-# 备用 ASR（系统麦克风录音识别，未在主链路强制使用）
-SpeechRecognition
-
-# TTS 音频播放（Edge-TTS 生成的 mp3 用 pygame mixer 播放）
+# TTS 音频播放
 pygame
 
-# 极轻量 ONNX 推理（FER 情绪分类 / 后续可选模型，CPU 低占用）
-onnxruntime>=1.16.0
+# ASR 语音识别（Faster-Whisper，CPU + INT8 量化，按需懒加载）
+faster-whisper
+
+# 实时麦克风录音（main.py 录音用 sounddevice + wave）
+sounddevice
