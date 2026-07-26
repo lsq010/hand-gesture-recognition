@@ -1099,16 +1099,31 @@ class MainWindow(QWidget):
     #  Phase B 辅助：在 frame 上叠加掌心轨迹线 + 动态手势名
     # ------------------------------------------------------------------ #
     def _draw_palm_trail_and_dynamic(self, frame, dyn):
-        """掌心轨迹：左手绿 / 右手橙；动态手势名浮动显示在画面顶部。"""
+        """掌心轨迹：颜色随动态手势变化（画圈=青 / 挥手=黄 / 滑动=紫 / 无=灰）；
+        动态手势名浮动显示在画面顶部。"""
         if frame is None:
             return
         h, w = frame.shape[:2]
 
+        # 动态手势 → 轨迹颜色映射，让「画圈 / 挥手」在画面上肉眼可区分
+        def _dyn_color(d):
+            if d == "Circle":
+                return (255, 255, 0)        # 青色（画圈）
+            if d == "Wave":
+                return (0, 255, 255)        # 黄色（挥手）
+            if d and d.startswith("Swipe"):
+                return (255, 0, 255)        # 紫色（滑动）
+            return (120, 120, 120)          # 灰色（无动态）
+
+        # 提前取出左右动态标签，供轨迹着色使用
+        l_dyn = (dyn or {}).get("left_dynamic", "None") or "None"
+        r_dyn = (dyn or {}).get("right_dynamic", "None") or "None"
+
         # 1) 轨迹线：归一化坐标 → 像素坐标
         if self.tracker is not None:
             for pts, color, thick in [
-                (self.tracker.left_pts, (0, 255, 0), 2),
-                (self.tracker.right_pts, (255, 200, 0), 2),
+                (self.tracker.left_pts, _dyn_color(l_dyn), 3),
+                (self.tracker.right_pts, _dyn_color(r_dyn), 3),
             ]:
                 pts_list = list(pts)
                 if len(pts_list) < 2:
@@ -1127,17 +1142,8 @@ class MainWindow(QWidget):
                 cv2.circle(frame, (cx, cy), 6, color, -1)
                 cv2.circle(frame, (cx, cy), 8, (255, 255, 255), 1)
 
-        # 2) 动态手势名（英文 cv2.putText 即可，中文才需要 PIL）
-        l_dyn = (dyn or {}).get("left_dynamic", "None") or "None"
-        r_dyn = (dyn or {}).get("right_dynamic", "None") or "None"
-        text = f"Dynamic  L:{l_dyn}  R:{r_dyn}"
-
-        # 半透明黑底便于在浅色背景上看清
-        (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
-        cv2.rectangle(frame, (8, 8), (8 + tw + 16, 8 + th + 16), (0, 0, 0), -1)
-        cv2.rectangle(frame, (8, 8), (8 + tw + 16, 8 + th + 16), (0, 165, 255), 1)
-        cv2.putText(frame, text, (16, 8 + th + 6),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 200), 2)
+        # 2) 左上角动态手势提示已移除，避免数字/编号与画面内容重叠。
+        # 动态结果继续通过右侧「实时监测」面板显示。
 
     # ------------------------------------------------------------------ #
     #  键盘 / 语音 与 Kimi 交流

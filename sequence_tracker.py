@@ -48,66 +48,97 @@ class SequenceTracker:
     def _dist(p1, p2):
         return math.sqrt((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2)
 
+    @staticmethod
+    def _polygon_area(pts):
+        """shoelace 公式计算轨迹围合面积（绝对值）。"""
+        n = len(pts)
+        if n < 3:
+            return 0.0
+        s = 0.0
+        for i in range(n):
+            x1, y1 = pts[i]
+            x2, y2 = pts[(i + 1) % n]
+            s += x1 * y2 - x2 * y1
+        return abs(s) * 0.5
+
     def _analyze_trajectory(self, pts):
-        """
-        对单手的点轨迹分析：挥手 / 划动 / 画圈 / None
-        坐标均为归一化 (0~1)，故阈值无量纲、与分辨率无关。
+        """单手轨迹分析：画圈 / 挥手 / 划动 / None。
 
-        判定顺序：Circle 先于 Wave —— 因为多圈画圈也会在 X 轴产生
-        >=2 次方向反转，若先判 Wave 会把它吞掉。
+        核心改进：用「绕质心的累计有符号转角」区分画圈与挥手。
+          - 画圈：手掌持续同方向绕圈，累计转角接近 ±360°（一圈以上），
+                  轨迹明显围成一个圈（等周比 circularity 高）。
+          - 挥手：手掌左右来回摆动，虽然 X 轴方向会有多次反转，
+                  但整体几乎不旋转（累计转角≈0），轨迹不围面积。
+        两者单靠"面积"无法干净分离（挥手带弧线也会围一点面积、
+        画圈首尾若不靠拢面积条件也常不满足）；改用「转角+等周比」
+        双特征后，几乎不再相互误判。
 
-        画圈判定核心用「围合面积」而非「累计转角」：水平挥手每次反转处向量夹角
-        近 180°，累计转角同样巨大（与画圈相当），但挥手路径几乎不围面积(≈0)，
-        而圆圈围出约 π·r² 的显著面积。两者由此干净分开。
+        判定顺序：Circle 先于 Wave，因为画圈时 X 轴也会有 ≥2 次方向
+        反转，若先判 Wave 会把圈吞掉；而 Circle 分支要求转角大，
+        挥手转角≈0 不会误入，故安全。
         """
         # 窗口未填满 70% 时不判（避免极短抖动误触发）
         if len(pts) < self.max_length * 0.7:
             return "None"
 
         pts_list = list(pts)
+        n = len(pts_list)
         start_pt = pts_list[0]
         end_pt = pts_list[-1]
 
-        # 1. 基础物理量计算
-        net_dist = self._dist(start_pt, end_pt)   # 净位移（首尾直线距离）
-        total_path_len = 0.0                       # 总路程（轨迹折线长）
-        x_reversals = 0                            # X 轴方向反转次数（挥手特征）
+        # 1. 基础物理量
+        net_dist = self._dist(start_pt, end_pt)   # 首尾直线距离
+        total_path_len = 0.0                       # 总路程
+        x_reversals = 0                            # X 轴方向反转次数
         last_dx = 0
 
-        for i in range(1, len(pts_list)):
+        # 绕质心累计有符号转角（画圈≈±2π，挥手≈0）
+        cx = sum(p[0] for p in pts_list) / n
+        cy = sum(p[1] for p in pts_list) / n
+        prev_angle = None
+        total_turn = 0.0
+
+        for i in range(1, n):
             dx = pts_list[i][0] - pts_list[i - 1][0]
             dy = pts_list[i][1] - pts_list[i - 1][1]
-            step_len = math.sqrt(dx ** 2 + dy ** 2)
-            total_path_len += step_len
+            total_path_len += math.sqrt(dx * dx + dy * dy)
 
-            # 统计 X 轴方向反转（过滤微小抖动，避免噪声造成误计数）
+            # X 轴方向反转（过滤微小抖动）
             if abs(dx) > 0.01:
                 if last_dx != 0 and (dx * last_dx < 0):
                     x_reversals += 1
                 last_dx = dx
 
-        # 2. 画圈 (Circle) 优先：轨迹闭合(首尾靠近) 且 围出显著面积
-        #    shoelace 多边形面积；圆圈 ≈ π·r²，水平挥手路径自重叠 ≈ 0
-        area = 0.0
-        n = len(pts_list)
-        for i in range(n):
-            x1, y1 = pts_list[i]
-            x2, y2 = pts_list[(i + 1) % n]
-            area += x1 * y2 - x2 * y1
-        area = abs(area) * 0.5
-        if area > 0.004 and net_dist < 0.15:
+            # 有符号转角（绕质心，归一化到 [-π, π]）
+            ang = math.atan2(pts_list[i][1] - cy, pts_list[i][0] - cx)
+            if prev_angle is not None:
+                d = ang - prev_angle
+                while d > math.pi:
+                    d -= 2 * math.pi
+                while d < -math.pi:
+                    d += 2 * math.pi
+                total_turn += d
+            prev_angle = ang
+
+        # 等周比：圆≈1，直线/来回≈0（与圈大小无关，比绝对面积稳定）
+        area = self._polygon_area(pts_list)
+        perimeter = total_path_len if total_path_len > 0 else 1e-6
+        circularity = (4.0 * math.pi * area) / (perimeter * perimeter)
+
+        # 2. 画圈（优先）：累计转角接近一圈以上，且轨迹确实围成圈
+        if abs(total_turn) > 1.1 * math.pi and circularity > 0.2:
             return "Circle"
 
-        # 3. 挥手 (Wave)：水平方向反转 >= 2 次，且总路程足够大
-        #    （画圈已在上一步被拦下；挥手围合面积≈0，不会误入 Circle）
+        # 3. 挥手：水平来回反转≥2 次，且总路程够大。
+        #    （画圈已被上一步 circularity>0.2 拦下；挥手来回 circularity≈0，
+        #      不会误入 Circle，故无需再用转角去排除。）
         if x_reversals >= 2 and total_path_len > 0.3:
             return "Wave"
 
-        # 4. 划动 (Swipe)：路程与净位移接近（近直线），且位移显著
-        if total_path_len > 0.25 and (net_dist / total_path_len) > 0.75:
+        # 4. 划动：近直线平移
+        if total_path_len > 0.25 and (net_dist / perimeter) > 0.75:
             dx_net = end_pt[0] - start_pt[0]
             dy_net = end_pt[1] - start_pt[1]
-
             if abs(dx_net) > abs(dy_net):
                 return "Swipe_Right" if dx_net > 0 else "Swipe_Left"
             else:
