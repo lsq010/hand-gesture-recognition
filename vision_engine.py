@@ -8,6 +8,8 @@
 # 性能：model_complexity=0（Lite 手模型）榨干 CPU 性能；
 #       双手检测；每帧推理（仅 Hands，足够快，YOLO 接入时再加节流）。
 
+import platform
+
 import cv2
 import mediapipe as mp
 from gesture_classifier import GestureClassifier
@@ -15,7 +17,15 @@ from gesture_classifier import GestureClassifier
 
 class VisionEngine:
     def __init__(self, camera_index=0):
-        self.cap = cv2.VideoCapture(camera_index)
+        # Windows 上用 CAP_DSHOW 后端打开摄像头，比默认 Media Foundation 快很多
+        # （首帧延迟从数秒降到数百毫秒），直接解决「打开摄像头很慢」。
+        if platform.system() == "Windows":
+            try:
+                self.cap = cv2.VideoCapture(camera_index, cv2.CAP_DSHOW)
+            except Exception:  # noqa: BLE001
+                self.cap = cv2.VideoCapture(camera_index)
+        else:
+            self.cap = cv2.VideoCapture(camera_index)
 
         # 初始化 MediaPipe Hands (补上 model_complexity=0 榨干 CPU 性能)
         self.mp_hands = mp.solutions.hands
@@ -24,7 +34,7 @@ class VisionEngine:
             max_num_hands=2,
             model_complexity=0,          # 极速模式，大幅降低 CPU 占用
             min_detection_confidence=0.6,
-            min_tracking_confidence=0.6
+            min_tracking_confidence=0.5,  # 调低：快速画圆/挥手时减少漏检，避免轨迹断笔
         )
         self.mp_draw = mp.solutions.drawing_utils
         self.classifier = GestureClassifier()

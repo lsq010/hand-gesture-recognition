@@ -14,17 +14,18 @@ import uuid
 import edge_tts
 import pygame
 
-# 初始化 pygame mixer 用于音频播放（headless 环境可能失败，已兜底）
-try:
-    pygame.mixer.init()
-except Exception as e:  # noqa: BLE001
-    print(f">>> Pygame Mixer 初始化提示: {e}")
-
 
 class TTSManager:
     def __init__(self, voice="zh-CN-XiaoxiaoNeural"):
         """Edge-TTS 异步语音播报封装。"""
         self.voice = voice
+        # 懒初始化音频 mixer：放在构造时而非模块导入时，
+        # 避免程序一启动就初始化音频设备（headless / 无设备时失败不致命）。
+        try:
+            if not pygame.mixer.get_init():
+                pygame.mixer.init()
+        except Exception as e:  # noqa: BLE001
+            print(f">>> Pygame Mixer 初始化提示: {e}")
 
     def speak(self, text, block=False):
         """

@@ -17,32 +17,49 @@ from collections import deque
 
 
 class SequenceTracker:
-    def __init__(self, max_length=35):
+    def __init__(self, max_length=48, missing_grace=8):
         """
-        :param max_length: 滑动窗口帧数 (30-45 帧适合约 30 FPS 摄像头)
-                           —— 约 1.0~1.5 秒的动态过程。
+        :param max_length: 滑动窗口帧数。调大可让「画圈」轨迹保留更久、线条更连贯
+                           —— 原 35 帧约 1.1s，常把整圈挤出导致线短/断；64 帧约 2.1s
+                           足以覆盖一次完整画圈。
+        :param missing_grace: 连续丢手（未检测到该侧手）多少帧才清空轨迹。
+                           画圈/挥手时 MediaPipe 偶发漏检 1~2 帧会瞬间清空整条轨迹，
+                           造成「很容易断」；给一个宽限期，漏检期间保留轨迹、不新增点，
+                           手回来后自然接回，避免断笔。
         """
         self.max_length = max_length
+        self.missing_grace = missing_grace
         # 维护左右手的掌心轨迹队列 (Point: (x, y))，x/y 均为归一化坐标 (0~1)
         self.left_pts = deque(maxlen=max_length)
         self.right_pts = deque(maxlen=max_length)
+        self.left_missing = 0
+        self.right_missing = 0
 
     def update(self, left_landmarks, right_landmarks):
         """
         每帧调用：传入 21 点关键点，更新手心 (取 Landmark 9 - 掌心中心 MCP)。
-        无对应手时清空该侧队列（避免残留轨迹影响判定）。
+        无对应手时进入「宽限期」：连续 missing_grace 帧都检测不到才清空（一笔结束），
+        期间保留已有轨迹、不新增点，避免偶发漏检把整条轨迹清空导致断笔。
         """
         if left_landmarks:
             p9 = left_landmarks[9]
             self.left_pts.append((p9.x, p9.y))
+            self.left_missing = 0
         else:
-            self.left_pts.clear()
+            self.left_missing += 1
+            if self.left_missing > self.missing_grace:
+                self.left_pts.clear()
+                self.left_missing = 0
 
         if right_landmarks:
             p9 = right_landmarks[9]
             self.right_pts.append((p9.x, p9.y))
+            self.right_missing = 0
         else:
-            self.right_pts.clear()
+            self.right_missing += 1
+            if self.right_missing > self.missing_grace:
+                self.right_pts.clear()
+                self.right_missing = 0
 
     @staticmethod
     def _dist(p1, p2):
@@ -77,8 +94,9 @@ class SequenceTracker:
         反转，若先判 Wave 会把圈吞掉；而 Circle 分支要求转角大，
         挥手转角≈0 不会误入，故安全。
         """
-        # 窗口未填满 70% 时不判（避免极短抖动误触发）
-        if len(pts) < self.max_length * 0.7:
+        # 窗口未填满 50% 时不判（避免极短抖动误触发；窗口调到 64 帧后用 0.5
+        # 让一次完整画圈能尽早被判定，仍足够排除随机抖动）
+        if len(pts) < self.max_length * 0.5:
             return "None"
 
         pts_list = list(pts)

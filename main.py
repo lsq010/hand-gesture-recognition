@@ -32,28 +32,17 @@ try:
 except ImportError:
     Ui_Form = None
 
-# ---- 复用前几阶段封装好的模块（单点失败不影响整体） ----
-try:
-    from vision_engine import VisionEngine
-except ImportError:
-    VisionEngine = None
-try:
-    from sequence_tracker import SequenceTracker
-except ImportError:
-    SequenceTracker = None
-try:
-    from object_detector import ObjectDetector
-except ImportError:
-    ObjectDetector = None
-try:
-    from llm_client import KimiLLMClient
-except ImportError:
-    KimiLLMClient = None
-try:
-    from asr_tts import ASRManager, TTSManager
-except ImportError:
-    ASRManager = None
-    TTSManager = None
+# ---- 重型模块延迟加载（懒加载） ----
+# 程序启动只加载 PySide6 / numpy / cv2 / database 等轻量依赖，窗口秒出；
+# 真正的模型（MediaPipe Hands / YOLO-World / whisper / pygame mixer）延迟到
+# 「打开摄像头」时由 CameraInitWorker 后台线程首次 import + 实例化，UI 不冻结。
+# 这样可把启动耗时从 ~11s 降到 ~2s。
+VisionEngine = None
+SequenceTracker = None
+ObjectDetector = None
+KimiLLMClient = None
+ASRManager = None
+TTSManager = None
 try:
     from database import (
         init_db, get_all_settings, get_setting, save_setting,
@@ -204,10 +193,16 @@ class _KeyTestWorker(QThread):
 
 
 class CameraInitWorker(QThread):
-    """后台线程初始化所有多模态组件（VisionEngine / YOLO / ASR / TTS / LLM），
-    避免点击「打开摄像头」后界面卡死 5 秒。完成后把组件对象回传主线程。"""
+    """后台线程分两阶段初始化多模态组件，避免「打开摄像头」要等最重的 YOLO-World
+    加载完才出画面（之前会卡 5~8 秒）：
 
-    done = Signal(object, object, object, object, object, object, object)
+    - 阶段1（快速）：打开摄像头 + MediaPipe + 手势轨迹器 → cam_ready，画面立即可用；
+    - 阶段2（重）：YOLO-World 物体检测 / ASR / TTS / Kimi → extras_ready，后台继续加载，
+      不阻塞画面显示。用户在「物体检测/语音」就绪前就能看到手势画面并操作。
+    """
+
+    cam_ready = Signal(object, object, object)                 # vision, cap_fallback, tracker
+    extras_ready = Signal(object, object, object, object)      # obj, llm, tts, asr
     failed = Signal(str)
 
     def __init__(self, api_key=""):
@@ -215,54 +210,100 @@ class CameraInitWorker(QThread):
         self.api_key = api_key or ""
 
     def run(self):
+        # 在后台线程首次导入重型依赖（启动阶段不导入，避免 ~11s 卡顿）。
+        # 这些 import 失败则保持 None，下方逻辑走兜底分支。
+        global VisionEngine, SequenceTracker, ObjectDetector, KimiLLMClient, TTSManager, ASRManager
+
+        # ---- 阶段1：摄像头 + 手势（轻量，尽快出画面） ----
+        try:
+            from vision_engine import VisionEngine as _VE
+            VisionEngine = _VE
+        except Exception as e:  # noqa: BLE001
+            print(f">>> [B] vision_engine 导入失败: {e}")
+            VisionEngine = None
+        try:
+            from sequence_tracker import SequenceTracker as _ST
+            SequenceTracker = _ST
+        except Exception as e:  # noqa: BLE001
+            SequenceTracker = None
+
         vision = None
         cap_fallback = None
         tracker = None
-        obj = None
-        llm = None
-        tts = None
-        asr = None
         try:
             if VisionEngine is not None:
-                vision = VisionEngine(camera_index=0)
                 try:
-                    for _ in range(2):
-                        f, _ = vision.process_frame()
-                        if f is None:
-                            break
-                except Exception:  # noqa: BLE001
-                    pass
-            else:
-                vision = None
-
+                    vision = VisionEngine(camera_index=0)
+                except Exception as e:  # noqa: BLE001
+                    print(f">>> [B] VisionEngine 初始化失败: {e}")
+                    vision = None
             if vision is None:
                 try:
                     cap_fallback = cv2.VideoCapture(0)
                 except Exception:  # noqa: BLE001
                     cap_fallback = None
-
             if SequenceTracker is not None:
-                tracker = SequenceTracker(max_length=35)
-
-            if ObjectDetector is not None:
-                try:
-                    obj = ObjectDetector()
-                except Exception as e:  # noqa: BLE001
-                    print(f">>> [B] ObjectDetector 初始化失败: {e}")
-                    obj = None
-
-            if KimiLLMClient is not None:
-                llm = KimiLLMClient(api_key=self.api_key)
-
-            if TTSManager is not None:
-                tts = TTSManager()
-
-            if ASRManager is not None:
-                asr = ASRManager(model_size="tiny")
-
-            self.done.emit(vision, cap_fallback, tracker, obj, llm, tts, asr)
+                tracker = SequenceTracker(max_length=48, missing_grace=8)
         except Exception as e:  # noqa: BLE001
             self.failed.emit(str(e))
+            return
+
+        # 摄像头完全打不开（无设备/被占用）→ 直接失败，不再后台加载重物
+        if vision is None and cap_fallback is None:
+            self.failed.emit("无法打开摄像头（cv2.VideoCapture 失败，请检查设备/权限）")
+            return
+
+        # 立即通知主线程：摄像头已开，画面可以显示了（此时 obj/llm/tts/asr 仍为 None）
+        self.cam_ready.emit(vision, cap_fallback, tracker)
+
+        # ---- 阶段2：重组件（YOLO-World / ASR / TTS / Kimi）后台继续 ----
+        obj = llm = tts = asr = None
+        try:
+            from object_detector import ObjectDetector as _OD
+            ObjectDetector = _OD
+        except Exception as e:  # noqa: BLE001
+            print(f">>> [B] object_detector 导入失败: {e}")
+            ObjectDetector = None
+        try:
+            if ObjectDetector is not None:
+                obj = ObjectDetector()
+        except Exception as e:  # noqa: BLE001
+            print(f">>> [B] ObjectDetector 初始化失败: {e}")
+            obj = None
+
+        try:
+            from llm_client import KimiLLMClient as _KL
+            KimiLLMClient = _KL
+        except Exception as e:  # noqa: BLE001
+            KimiLLMClient = None
+        try:
+            if KimiLLMClient is not None and self.api_key:
+                llm = KimiLLMClient(api_key=self.api_key)
+        except Exception as e:  # noqa: BLE001
+            print(f">>> [B] KimiLLMClient 初始化失败: {e}")
+            llm = None
+
+        try:
+            from asr_tts import ASRManager as _AM, TTSManager as _TM
+            ASRManager = _AM
+            TTSManager = _TM
+        except Exception as e:  # noqa: BLE001
+            ASRManager = None
+            TTSManager = None
+        try:
+            if TTSManager is not None:
+                tts = TTSManager()
+        except Exception as e:  # noqa: BLE001
+            print(f">>> [B] TTSManager 初始化失败: {e}")
+            tts = None
+        try:
+            if ASRManager is not None:
+                asr = ASRManager(model_size="tiny")
+        except Exception as e:  # noqa: BLE001
+            print(f">>> [B] ASRManager 初始化失败: {e}")
+            asr = None
+
+        self.extras_ready.emit(obj, llm, tts, asr)
 
 
 class ChatWorker(QThread):
@@ -898,35 +939,51 @@ class MainWindow(QWidget):
         # 立即反馈，避免用户以为程序卡死；UI 不再被初始化阻塞
         self.ui.openCamButton.setEnabled(False)
         self.ui.closeCamButton.setEnabled(True)
-        self.statusBar_show("正在初始化多模态组件…（后台加载中）")
+        self.statusBar_show("正在打开摄像头…（手势识别即将可用，物体检测/语音后台加载中）")
         # 读取本次会话内的 Key（仅本会话有效，不读 env/db），交给后台线程
         session_key = (getattr(self, "api_key", "") or "").strip().strip('"\'').strip()
         final_key = session_key if len(session_key) >= 20 else ""
         self._init_worker = CameraInitWorker(api_key=final_key)
-        self._init_worker.done.connect(self._on_camera_ready)
+        self._init_worker.cam_ready.connect(self._on_camera_ready)
+        self._init_worker.extras_ready.connect(self._on_extras_ready)
         self._init_worker.failed.connect(self._on_camera_init_failed)
         self._init_worker.start()  # 后台加载，UI 立刻恢复响应
 
-    def _on_camera_ready(self, vision, cap_fallback, tracker, obj, llm, tts, asr):
-        """后台初始化完成，组件已就绪，回到主线程启动实时循环。"""
+    def _on_camera_ready(self, vision, cap_fallback, tracker):
+        """阶段1完成：摄像头 + 手势引擎已就绪，立即启动画面（物体检测/语音仍在后台加载）。"""
         self._init_running = False
         self.vision = vision
         self.cap_fallback = cap_fallback
         self.tracker = tracker
-        self.obj = obj
-        self.llm = llm
-        self.tts = tts
-        self.asr = asr
-        self._update_api_key_alert()  # 顶部告警条按 LLM 状态显示/隐藏
 
         self._running = True
         self.timer.start(33)  # ~30 FPS
-        self.statusBar_show("摄像头已开启 | 实时识别中")
+        self.statusBar_show("摄像头已开启 | 手势识别中（物体检测/语音后台加载中…）")
         # 自动切到「实时监测（手势含义）」Tab，开摄像头先看手势/含义
         try:
             self.rightTabs.setCurrentIndex(1)
         except Exception:  # noqa: BLE001
             pass
+
+    def _on_extras_ready(self, obj, llm, tts, asr):
+        """阶段2完成：YOLO 物体检测 / ASR / TTS / Kimi 全部就绪，挂到主窗口启用。
+
+        边界：若用户在加载期间已关闭摄像头（self._running 为 False 或摄像头已释放），
+        则直接释放这些刚创建的组件，不挂到主窗口，避免「幽灵」后台线程继续跑。
+        """
+        if not self._running or self.vision is None:
+            if obj is not None:
+                try:
+                    obj.stop()
+                except Exception:  # noqa: BLE001
+                    pass
+            return
+        self.obj = obj
+        self.llm = llm
+        self.tts = tts
+        self.asr = asr
+        self._update_api_key_alert()  # 顶部告警条按 LLM 状态显示/隐藏
+        self.statusBar_show("摄像头已开启 | 全部组件就绪")
 
     def _on_camera_init_failed(self, msg):
         self._init_running = False
@@ -1128,12 +1185,21 @@ class MainWindow(QWidget):
                 pts_list = list(pts)
                 if len(pts_list) < 2:
                     continue
-                # 逐段连线（用最近 35 帧，deque maxlen）
+                # 逐段连线（用最近 max_length 帧，deque maxlen）。
+                # 相邻点跳变过大视为「断笔」（手曾离开/漏检又被检出），不连直线，
+                # 避免从画面一端拉一条长线穿越；手回来后的后续点会正常接回。
+                max_jump2 = 0.18 * 0.18  # 归一化距离平方阈值
                 for i in range(1, len(pts_list)):
-                    p1 = (int(pts_list[i - 1][0] * w), int(pts_list[i - 1][1] * h))
-                    p2 = (int(pts_list[i][0] * w), int(pts_list[i][1] * h))
-                    # 越新的线越亮：渐变 alpha
-                    alpha = 0.4 + 0.6 * (i / len(pts_list))
+                    a = pts_list[i - 1]
+                    b = pts_list[i]
+                    dx = b[0] - a[0]
+                    dy = b[1] - a[1]
+                    if dx * dx + dy * dy > max_jump2:
+                        continue  # 缺口不连直线
+                    p1 = (int(a[0] * w), int(a[1] * h))
+                    p2 = (int(b[0] * w), int(b[1] * h))
+                    # 越新的线越亮、越老的越淡（尾部自然消退，避免长痕赖着）
+                    alpha = 0.3 + 0.7 * (i / len(pts_list))
                     c = tuple(int(v * alpha + 30 * (1 - alpha)) for v in color)
                     cv2.line(frame, p1, p2, c, thick)
                 # 当前点画个小圆
@@ -1298,6 +1364,14 @@ class MainWindow(QWidget):
     
     def closeEvent(self, event):
         self.stop_camera()
+        # 断开初始化线程信号，避免程序退出后回调已半销毁的对象
+        if getattr(self, "_init_worker", None) is not None:
+            try:
+                self._init_worker.cam_ready.disconnect()
+                self._init_worker.extras_ready.disconnect()
+                self._init_worker.failed.disconnect()
+            except Exception:  # noqa: BLE001
+                pass
         # 关闭程序时清空识别历史（logs 表）：
         #   - 历史只在本会话内可见
         #   - 重启后从空白开始，避免无限累积 / 隐私外泄
