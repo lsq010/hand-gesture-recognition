@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QApplication, QWidget, QGroupBox, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QLineEdit, QTextEdit, QTableWidget, QTableWidgetItem,
     QTabWidget, QDialog, QDialogButtonBox, QScrollArea, QFrame, QMessageBox,
+    QSizePolicy,
 )
 from PySide6.QtCore import Qt, QTimer, QThread, Signal
 from PySide6.QtGui import QImage, QPixmap
@@ -145,6 +146,63 @@ def cv2_to_pixmap(frame, target_w, target_h):
     return pix.scaled(tw, th, Qt.KeepAspectRatio, Qt.SmoothTransformation)
 
 
+class _KeyTestWorker(QThread):
+    """在子线程里向 Moonshot 发最小请求，验证 Key 是否可用。
+    - result(ok: bool, message: str)：ok=True 时 message 是模型回复；ok=False 时是错误原因。
+    """
+
+    result = Signal(bool, str)
+
+    def __init__(self, api_key: str, parent=None):
+        super().__init__(parent)
+        self.api_key = api_key
+
+    def run(self):
+        try:
+            if KimiLLMClient is None:
+                self.result.emit(False, "llm_client 模块不可用")
+                return
+            client = KimiLLMClient(api_key=self.api_key)
+            # 探测方式：调 models.list() 拿可用模型列表 —— 这是元数据 API，
+            # 不触发聊天模型冷启动，通常 300-800ms 内返回。比 chat.completions 快 10×。
+            try:
+                models = client.client.models.list(timeout=8)
+                n = len(models.data) if hasattr(models, "data") else 0
+                self.result.emit(True, f"通过（元数据 API，可访问 {n} 个模型）")
+            except Exception as e_meta:  # noqa: BLE001
+                # 元数据 API 失败但仍想确认网络通：降级到一次极小聊天（用稳定的 moonshot-v1-8k）
+                status = getattr(e_meta, "status_code", None)
+                if status == 401 or "Invalid Authentication" in str(e_meta) or "invalid_api_key" in str(e_meta).lower():
+                    self.result.emit(False, f"401 认证失败 — Key 不正确或已被撤销（{str(e_meta)[:80]}）")
+                    return
+                try:
+                    resp = client.client.chat.completions.create(
+                        model="moonshot-v1-8k",  # 比 kimi-latest 快得多，无冷启动
+                        messages=[{"role": "user", "content": "ping"}],
+                        temperature=0,
+                        max_tokens=4,
+                        timeout=8,
+                    )
+                    text = (resp.choices[0].message.content or "").strip() or "(空)"
+                    self.result.emit(True, f"通过（聊天 API，回 \"{text[:20]}\"）")
+                except Exception as e_chat:  # noqa: BLE001
+                    # 把 meta + chat 两个异常合并诊断
+                    msg_chat = str(e_chat)
+                    st_chat = getattr(e_chat, "status_code", None) or (
+                        getattr(getattr(e_chat, "response", None), "status_code", None)
+                        if getattr(e_chat, "response", None) is not None else None
+                    )
+                    if st_chat == 401 or "Invalid Authentication" in msg_chat or "invalid_api_key" in msg_chat.lower():
+                        self.result.emit(False, f"401 认证失败 — Key 不正确或已被撤销（{msg_chat[:80]}）")
+                    elif st_chat == 429 or "rate limit" in msg_chat.lower() or "insufficient_quota" in msg_chat.lower():
+                        self.result.emit(False, f"429 限流/配额不足（{msg_chat[:80]}）")
+                    else:
+                        self.result.emit(False, f"{st_chat or '网络/未知'} — {msg_chat[:160]}")
+        except Exception as e:  # noqa: BLE001
+            # 最外层兜底：任何未预期异常都安全返回
+            self.result.emit(False, f"未预期错误：{str(e)[:160]}")
+
+
 class ChatWorker(QThread):
     """在子线程里调用 Kimi，避免阻塞 UI。"""
 
@@ -221,6 +279,10 @@ class MainWindow(QWidget):
     def _build_extra_panels(self):
         right = self.ui.rightPanelLayout
 
+        # === 0) 保持 rec.ui 原有左右布局比例 ===
+        # camFrame 原本是 Expanding，不能额外设置最小宽度；否则右侧提示条会把
+        # 窗口最小宽度撑大，启动时出现文字挤压或控件遮盖。
+
         # === 1) 先把 rec.ui 默认塞进 rightPanelLayout 的 4 个 GroupBox 全部取出 ===
         preset_widgets = []
         while right.count():
@@ -254,9 +316,14 @@ class MainWindow(QWidget):
         self.apiKeyAlert.setStyleSheet(
             "color: #2b2200; background-color: #ffd54a;"
             "border: 1px solid #b58900; border-radius: 4px;"
-            "padding: 4px 10px; font-weight: bold;"
+            "padding: 3px 4px; font-size: 11px; font-weight: bold;"
             "font-family: 'Microsoft YaHei', 'SimHei', sans-serif;"
         )
+        # 固定提示条宽度，避免缺少 Key / 已配置两种状态切换时改变布局；
+        # 不换行，确保完整文案不会被自身高度裁掉。
+        self.apiKeyAlert.setFixedWidth(270)
+        self.apiKeyAlert.setWordWrap(False)
+        self.apiKeyAlert.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         # 创建后立即刷新一次告警条（之前是在 _init_database 之前调用，那时标签还不存在，被 safe-return 掉了）
         self._update_api_key_alert()
         self.apiKeyAlert.setVisible(False)  # 默认隐藏，初始化 LLM 后再决定
@@ -356,7 +423,7 @@ class MainWindow(QWidget):
         cfg_layout = QVBoxLayout(cfg_group)
         cfg_layout.setSpacing(6)
         self.apiKeyEdit = QLineEdit()
-        self.apiKeyEdit.setPlaceholderText("粘贴 Moonshot API Key（留空则用环境变量）")
+        self.apiKeyEdit.setPlaceholderText("粘贴 Moonshot API Key（仅本会话有效，重启后需重新输入）")
         self.apiKeyEdit.setEchoMode(QLineEdit.Password)
         self.apiKeyEdit.setStyleSheet(
             "background-color:#151515; color:#f0f0f0; border:1px solid #333;"
@@ -366,6 +433,10 @@ class MainWindow(QWidget):
         self.saveConfigButton = QPushButton("保存配置")
         self.saveConfigButton.clicked.connect(self._save_config)
         cfg_btn_row.addWidget(self.saveConfigButton)
+        self.testKeyButton = QPushButton("🔍 检测 Key 是否可用")
+        self.testKeyButton.setToolTip("向 Moonshot 发送最小测试请求，验证 Key 是否有效")
+        self.testKeyButton.clicked.connect(self._test_kimi_key)
+        cfg_btn_row.addWidget(self.testKeyButton)
         cfg_btn_row.addStretch(1)
         cfg_layout.addLayout(cfg_btn_row)
         tab_sys_layout.addWidget(cfg_group)
@@ -543,6 +614,75 @@ class MainWindow(QWidget):
         else:
             self.statusBar_show("⚠ Key 为空，本次保存不会启用 Kimi 翻译")
 
+    # ------------------------------------------------------------------ #
+    #  检测 Key：向 Moonshot 发一个最小请求，验证 Key 是否可用
+    # ------------------------------------------------------------------ #
+    def _test_kimi_key(self):
+        """点「🔍 检测 Key 是否可用」时调用：
+        - 取输入框里的 Key（不污染 self.api_key，只验证不入库）
+        - 在子线程里向 Moonshot 发最小 chat completion（防 GUI 卡顿）
+        - 根据结果弹 ✅ 成功 / ❌ 失败 弹窗，并提示具体原因（401/429/网络/未知）
+        """
+        if KimiLLMClient is None:
+            QMessageBox.critical(self, "检测失败", "llm_client 模块不可用，无法检测 Key。")
+            return
+        key = self.apiKeyEdit.text().strip().strip('"\'').strip()
+        if not key:
+            QMessageBox.warning(
+                self,
+                "缺少 Key",
+                "请先在输入框粘贴 Moonshot API Key，再点「🔍 检测 Key 是否可用」。"
+            )
+            self.apiKeyEdit.setFocus()
+            return
+        if len(key) < 20:
+            QMessageBox.warning(
+                self,
+                "Key 长度异常",
+                f"当前 Key 仅 {len(key)} 个字符，正常 Moonshot Key 通常 ≥ 30 字符。\n"
+                "可能是复制时被截断，或夹带了多余字符。"
+            )
+            return
+
+        # 禁用按钮，防止重复点击
+        self.testKeyButton.setEnabled(False)
+        original_text = self.testKeyButton.text()
+        self.testKeyButton.setText("🔍 检测中...")
+        self.statusBar_show("正在向 Moonshot 发送最小测试请求...")
+
+        # 启动 QThread 异步检测（避免 GUI 卡 1~3 秒）
+        self._test_kimi_thread = _KeyTestWorker(key, parent=self)
+        self._test_kimi_thread.result.connect(self._on_kimi_key_tested)
+        self._test_kimi_thread.finished.connect(
+            lambda: (
+                self.testKeyButton.setEnabled(True),
+                self.testKeyButton.setText(original_text),
+            )
+        )
+        self._test_kimi_thread.start()
+
+    def _on_kimi_key_tested(self, ok: bool, message: str):
+        """子线程回调：弹成功/失败弹窗。"""
+        if ok:
+            QMessageBox.information(
+                self,
+                "✅ Key 可用",
+                f"Moonshot Key 检测通过！\n\n服务器返回：{message}",
+            )
+            self.statusBar_show("✅ Key 检测通过")
+        else:
+            QMessageBox.critical(
+                self,
+                "❌ Key 不可用",
+                f"Moonshot Key 检测失败。\n\n原因：{message}\n\n"
+                "可能原因：\n"
+                "① Key 复制不完整（含空格/换行/引号残留）；\n"
+                "② Key 已过期或在 Moonshot 控制台被撤销；\n"
+                "③ 账号未开通 API 访问 / 余额不足 / 触发限流；\n"
+                "④ 网络问题导致请求失败。",
+            )
+            self.statusBar_show(f"❌ Key 检测失败: {message}")
+
     def _refresh_history(self):
         """从 logs 表读取最近记录并填充历史表格。"""
         if not HAS_DB:
@@ -606,12 +746,12 @@ class MainWindow(QWidget):
             src = "未配置"
         if configured:
             self.apiKeyAlert.setText(
-                f"✅ Kimi 已配置：{getattr(self.llm, 'model', '')} | 来源: {src}"
+                "✅ Kimi 已配置"
             )
             self.apiKeyAlert.setStyleSheet(
                 "color: #0d2b1a; background-color: #b6f0c2;"
                 "border: 1px solid #2e7d32; border-radius: 4px;"
-                "padding: 4px 10px; font-weight: bold;"
+                "padding: 3px 4px; font-size: 11px; font-weight: bold;"
                 "font-family: 'Microsoft YaHei', 'SimHei', sans-serif;"
             )
         else:
@@ -620,7 +760,7 @@ class MainWindow(QWidget):
             self.apiKeyAlert.setStyleSheet(
                 "color: #2b2200; background-color: #ffd54a;"
                 "border: 1px solid #b58900; border-radius: 4px;"
-                "padding: 4px 10px; font-weight: bold;"
+                "padding: 3px 4px; font-size: 11px; font-weight: bold;"
                 "font-family: 'Microsoft YaHei', 'SimHei', sans-serif;"
             )
         self.apiKeyAlert.setVisible(True)
