@@ -57,7 +57,7 @@ except ImportError:
 try:
     from database import (
         init_db, get_all_settings, get_setting, save_setting,
-        insert_log, get_logs, get_signs, insert_sign,
+        insert_log, get_logs, clear_logs, get_signs, insert_sign,
     )
     init_db()  # 幂等建表（logs / settings / sign_dictionary）
     HAS_DB = True
@@ -201,6 +201,68 @@ class _KeyTestWorker(QThread):
         except Exception as e:  # noqa: BLE001
             # 最外层兜底：任何未预期异常都安全返回
             self.result.emit(False, f"未预期错误：{str(e)[:160]}")
+
+
+class CameraInitWorker(QThread):
+    """后台线程初始化所有多模态组件（VisionEngine / YOLO / ASR / TTS / LLM），
+    避免点击「打开摄像头」后界面卡死 5 秒。完成后把组件对象回传主线程。"""
+
+    done = Signal(object, object, object, object, object, object, object)
+    failed = Signal(str)
+
+    def __init__(self, api_key=""):
+        super().__init__()
+        self.api_key = api_key or ""
+
+    def run(self):
+        vision = None
+        cap_fallback = None
+        tracker = None
+        obj = None
+        llm = None
+        tts = None
+        asr = None
+        try:
+            if VisionEngine is not None:
+                vision = VisionEngine(camera_index=0)
+                try:
+                    for _ in range(2):
+                        f, _ = vision.process_frame()
+                        if f is None:
+                            break
+                except Exception:  # noqa: BLE001
+                    pass
+            else:
+                vision = None
+
+            if vision is None:
+                try:
+                    cap_fallback = cv2.VideoCapture(0)
+                except Exception:  # noqa: BLE001
+                    cap_fallback = None
+
+            if SequenceTracker is not None:
+                tracker = SequenceTracker(max_length=35)
+
+            if ObjectDetector is not None:
+                try:
+                    obj = ObjectDetector()
+                except Exception as e:  # noqa: BLE001
+                    print(f">>> [B] ObjectDetector 初始化失败: {e}")
+                    obj = None
+
+            if KimiLLMClient is not None:
+                llm = KimiLLMClient(api_key=self.api_key)
+
+            if TTSManager is not None:
+                tts = TTSManager()
+
+            if ASRManager is not None:
+                asr = ASRManager(model_size="tiny")
+
+            self.done.emit(vision, cap_fallback, tracker, obj, llm, tts, asr)
+        except Exception as e:  # noqa: BLE001
+            self.failed.emit(str(e))
 
 
 class ChatWorker(QThread):
@@ -408,7 +470,40 @@ class MainWindow(QWidget):
         tab_live_layout.addStretch(1)
         self.rightTabs.addTab(tab_live, "🎯 实时监测")
 
-        # --- Tab 3：⚙ 系统设置（控制 / 显示 / 记录） ---
+        # --- Tab 3：📜 识别历史（数据库 logs 表 · 独立一页） ---
+        tab_history = QWidget()
+        tab_history_layout = QVBoxLayout(tab_history)
+        tab_history_layout.setContentsMargins(4, 8, 4, 4)
+        tab_history_layout.setSpacing(8)
+
+        self.historyGroup = QGroupBox("📜 识别历史记录 (数据库)")
+        hist_layout = QVBoxLayout(self.historyGroup)
+        self.historyTable = QTableWidget(0, 4)
+        self.historyTable.setHorizontalHeaderLabels(["时间", "手势", "物体", "翻译文本"])
+        self.historyTable.setStyleSheet(
+            "background-color:#151515; color:#f0f0f0; gridline-color:#333;"
+        )
+        self.historyTable.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.historyTable.setSelectionBehavior(QTableWidget.SelectRows)
+        self.historyTable.horizontalHeader().setStretchLastSection(True)
+        # 自动滚动到底部：默认让最近一次记录可见
+        sb = self.historyTable.verticalScrollBar()
+        sb.setValue(sb.maximum())
+        hist_layout.addWidget(self.historyTable, stretch=1)
+        hist_btn_row = QHBoxLayout()
+        self.refreshHistButton = QPushButton("刷新历史")
+        self.refreshHistButton.clicked.connect(self._refresh_history)
+        self.exportHistButton = QPushButton("导出 CSV")
+        self.exportHistButton.clicked.connect(self._export_history_csv)
+        hist_btn_row.addWidget(self.refreshHistButton)
+        hist_btn_row.addWidget(self.exportHistButton)
+        hist_btn_row.addStretch(1)
+        hist_layout.addLayout(hist_btn_row)
+        tab_history_layout.addWidget(self.historyGroup, stretch=1)
+
+        self.rightTabs.addTab(tab_history, "📜 识别历史")
+
+        # --- Tab 4：⚙ 系统设置（控制 / 显示 / 记录） ---
         tab_sys = QWidget()
         tab_sys_layout = QVBoxLayout(tab_sys)
         tab_sys_layout.setContentsMargins(4, 8, 4, 4)
@@ -441,36 +536,15 @@ class MainWindow(QWidget):
         cfg_layout.addLayout(cfg_btn_row)
         tab_sys_layout.addWidget(cfg_group)
 
-        # === 📜 识别历史记录（来自 logs 表） ===
-        self.historyGroup = QGroupBox("📜 识别历史记录 (数据库)")
-        hist_layout = QVBoxLayout(self.historyGroup)
-        self.historyTable = QTableWidget(0, 4)
-        self.historyTable.setHorizontalHeaderLabels(["时间", "手势", "物体", "翻译文本"])
-        self.historyTable.setStyleSheet(
-            "background-color:#151515; color:#f0f0f0; gridline-color:#333;"
-        )
-        self.historyTable.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.historyTable.setSelectionBehavior(QTableWidget.SelectRows)
-        self.historyTable.horizontalHeader().setStretchLastSection(True)
-        hist_layout.addWidget(self.historyTable, stretch=1)
-        hist_btn_row = QHBoxLayout()
-        self.refreshHistButton = QPushButton("刷新历史")
-        self.refreshHistButton.clicked.connect(self._refresh_history)
-        self.exportHistButton = QPushButton("导出 CSV")
-        self.exportHistButton.clicked.connect(self._export_history_csv)
-        hist_btn_row.addWidget(self.refreshHistButton)
-        hist_btn_row.addWidget(self.exportHistButton)
-        hist_btn_row.addStretch(1)
-        hist_layout.addLayout(hist_btn_row)
-        tab_sys_layout.addWidget(self.historyGroup)
-
         tab_sys_layout.addStretch(1)
         self.rightTabs.addTab(tab_sys, "⚙ 系统设置")
 
         right.addWidget(self.rightTabs, stretch=1)
 
         # 默认进入「系统设置」Tab；开摄像头时自动切到「实时监测（手势含义）」
-        self.rightTabs.setCurrentIndex(2)
+        self.rightTabs.setCurrentIndex(3)
+        # 切到「识别历史」Tab 时，自动把表格滚到最底部，让最新一条可见
+        self.rightTabs.currentChanged.connect(self._on_tab_changed)
 
     # ------------------------------------------------------------------ #
     # ------------------------------------------------------------------ #
@@ -587,7 +661,7 @@ class MainWindow(QWidget):
 
         # 4) 跳转到系统设置 Tab + 焦点给输入框 + 改 placeholder 提示
         if hasattr(self, "rightTabs"):
-            self.rightTabs.setCurrentIndex(2)  # 系统设置 Tab
+            self.rightTabs.setCurrentIndex(3)  # 系统设置 Tab
         if hasattr(self, "apiKeyEdit"):
             self.apiKeyEdit.setPlaceholderText(
                 "👉 请在这里粘贴 Moonshot API Key（sk-…），然后点「保存配置」"
@@ -684,11 +758,14 @@ class MainWindow(QWidget):
             self.statusBar_show(f"❌ Key 检测失败: {message}")
 
     def _refresh_history(self):
-        """从 logs 表读取最近记录并填充历史表格。"""
+        """从 logs 表读取最近记录并填充历史表格。
+        排序策略：ASC（最旧在表格顶部，最新一条在最后一行），
+        因此表格底部永远是最近一次的识别结果。
+        """
         if not HAS_DB:
             return
         try:
-            logs = get_logs(limit=200, order="DESC")
+            logs = get_logs(limit=200, order="ASC")
         except Exception as e:  # noqa: BLE001
             print(f">>> [DB] 读取 logs 失败: {e}")
             return
@@ -700,6 +777,8 @@ class MainWindow(QWidget):
             self.historyTable.setItem(i, 3, QTableWidgetItem(str(log.get("translation_text") or "")))
         self.historyTable.resizeColumnsToContents()
         self.historyTable.horizontalHeader().setStretchLastSection(True)
+        # 滚到表格底部，让最近一次记录始终可见
+        self.historyTable.scrollToBottom()
 
     def _export_history_csv(self):
         """把全部历史记录导出为 UTF-8-SIG CSV（Excel 友好）。"""
@@ -726,6 +805,23 @@ class MainWindow(QWidget):
             self.statusBar_show(f"历史已导出: {path}")
         except Exception as e:  # noqa: BLE001
             self.statusBar_show(f"导出失败: {e}")
+
+    def _on_tab_changed(self, index: int):
+        """切到「📜 识别历史」Tab 时，自动把表格滚到最底部。
+
+        这样无论之前在哪个 Tab（Kimi 对话 / 实时监测 / 系统设置），
+        只要用户切到识别历史，第一眼看到的就是最近一次的记录；
+        往上滚即可看到更早的历史。
+        """
+        try:
+            if not hasattr(self, "rightTabs") or not hasattr(self, "historyTable"):
+                return
+            tab_text = self.rightTabs.tabText(index)
+            if "识别历史" in tab_text:
+                # 先刷新一次（确保看到的是最新数据），再滚到底部
+                self._refresh_history()
+        except Exception as e:  # noqa: BLE001
+            print(f">>> [UI] 切换 Tab 时滚动到底部失败: {e}")
 
     # ------------------------------------------------------------------ #
     #  顶部 API Key 告警条（黄色 Alert，绝对不再遮挡数据记录按钮）
@@ -796,54 +892,33 @@ class MainWindow(QWidget):
     #  摄像头 / 多模态启动
     # ------------------------------------------------------------------ #
     def start_camera(self):
-        if self._running:
+        if self._running or getattr(self, "_init_running", False):
             return
-        self.statusBar_show("正在初始化多模态组件…")
-        try:
-            if VisionEngine is not None:
-                self.vision = VisionEngine(camera_index=0)
-                print(">>> [A] VisionEngine 就绪")
-            else:
-                self.vision = None
-    
-            if self.vision is None:
-                self.cap_fallback = cv2.VideoCapture(0)
-                print(">>> [A] 使用兜底摄像头（仅画面）")
-    
-            if SequenceTracker is not None:
-                self.tracker = SequenceTracker(max_length=35)
-                print(">>> [A] SequenceTracker 就绪")
-    
-            if ObjectDetector is not None:
-                try:
-                    self.obj = ObjectDetector()
-                except Exception as e:  # noqa: BLE001
-                    print(f">>> [B] ObjectDetector 初始化失败: {e}")
-                    self.obj = None
-        except Exception as e:  # noqa: BLE001
-            self.statusBar_show(f"摄像头初始化失败: {e}")
-            return
-    
-        if KimiLLMClient is not None:
-            # 只用本次会话内 self.api_key（用户在系统设置里粘贴 + 保存）。
-            # 故意忽略 env 与 DB：保证每次打开应用都"干净"，必须由用户自行输入 Key。
-            session_key = (getattr(self, "api_key", "") or "").strip().strip('"\'').strip()
-            if len(session_key) >= 20:
-                final_key = session_key
-                key_src = "session"
-            else:
-                final_key = ""
-                key_src = "none"
-            # 显式传 api_key（final_key 为 "" 时 llm_client 视为"故意为空"，不读 env）
-            self.llm = KimiLLMClient(api_key=final_key)
-            print(f">>> [Kimi] API Key 来源={key_src}, 长度={len(final_key)}")
-        if TTSManager is not None:
-            self.tts = TTSManager()
-        if ASRManager is not None:
-            self.asr = ASRManager(model_size="tiny")
-    
+        self._init_running = True
+        # 立即反馈，避免用户以为程序卡死；UI 不再被初始化阻塞
+        self.ui.openCamButton.setEnabled(False)
+        self.ui.closeCamButton.setEnabled(True)
+        self.statusBar_show("正在初始化多模态组件…（后台加载中）")
+        # 读取本次会话内的 Key（仅本会话有效，不读 env/db），交给后台线程
+        session_key = (getattr(self, "api_key", "") or "").strip().strip('"\'').strip()
+        final_key = session_key if len(session_key) >= 20 else ""
+        self._init_worker = CameraInitWorker(api_key=final_key)
+        self._init_worker.done.connect(self._on_camera_ready)
+        self._init_worker.failed.connect(self._on_camera_init_failed)
+        self._init_worker.start()  # 后台加载，UI 立刻恢复响应
+
+    def _on_camera_ready(self, vision, cap_fallback, tracker, obj, llm, tts, asr):
+        """后台初始化完成，组件已就绪，回到主线程启动实时循环。"""
+        self._init_running = False
+        self.vision = vision
+        self.cap_fallback = cap_fallback
+        self.tracker = tracker
+        self.obj = obj
+        self.llm = llm
+        self.tts = tts
+        self.asr = asr
         self._update_api_key_alert()  # 顶部告警条按 LLM 状态显示/隐藏
-    
+
         self._running = True
         self.timer.start(33)  # ~30 FPS
         self.statusBar_show("摄像头已开启 | 实时识别中")
@@ -852,6 +927,12 @@ class MainWindow(QWidget):
             self.rightTabs.setCurrentIndex(1)
         except Exception:  # noqa: BLE001
             pass
+
+    def _on_camera_init_failed(self, msg):
+        self._init_running = False
+        self.statusBar_show(f"摄像头初始化失败: {msg}")
+        self.ui.openCamButton.setEnabled(True)
+        self.ui.closeCamButton.setEnabled(False)
     
     def stop_camera(self):
         self._running = False
@@ -872,6 +953,11 @@ class MainWindow(QWidget):
             self.cap_fallback.release()
             self.cap_fallback = None
         self.statusBar_show("摄像头已关闭")
+        # 恢复按钮状态，允许用户再次打开摄像头
+        if hasattr(self.ui, "openCamButton"):
+            self.ui.openCamButton.setEnabled(True)
+        if hasattr(self.ui, "closeCamButton"):
+            self.ui.closeCamButton.setEnabled(False)
         # 关闭后把实时监测面板恢复成「初始黑屏」状态（不留最后一帧）
         self._clear_live_panel()
 
@@ -1206,6 +1292,16 @@ class MainWindow(QWidget):
     
     def closeEvent(self, event):
         self.stop_camera()
+        # 关闭程序时清空识别历史（logs 表）：
+        #   - 历史只在本会话内可见
+        #   - 重启后从空白开始，避免无限累积 / 隐私外泄
+        if HAS_DB:
+            try:
+                n = clear_logs()
+                if n > 0:
+                    print(f">>> [DB] 关闭程序，已清空 {n} 条识别历史")
+            except Exception as e:  # noqa: BLE001
+                print(f">>> [DB] 清空 logs 失败: {e}")
         super().closeEvent(event)
     
     def keyPressEvent(self, event):

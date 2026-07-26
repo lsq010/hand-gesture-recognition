@@ -84,6 +84,17 @@ def get_logs(limit=50, order="DESC") -> list:
     return [dict(r) for r in rows]
 
 
+def clear_logs() -> int:
+    """清空 logs 表全部记录，返回受影响行数。
+
+    设计目的：识别历史只在程序运行期间保留；每次关闭程序时一次性清理，
+    重启后从空白开始——避免历史无限增长、隐私不外泄，也便于按会话复盘。
+    """
+    with _connect() as conn:
+        cur = conn.execute("DELETE FROM logs")
+        return cur.rowcount
+
+
 # ── sign_dictionary：手势↔手语映射 ─────────────────────
 def insert_sign(gesture_name, sign_word, trajectory=None, features=None) -> int:
     """新增一条手势轨迹/特征 → 手语词汇映射，返回新行 id。"""
