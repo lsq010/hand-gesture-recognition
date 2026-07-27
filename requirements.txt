@@ -1,40 +1,41 @@
-# 依赖包，建议在虚拟环境中安装
-# 安装命令：
+# Dependencies. Install in a virtualenv:
 #   pip install -r requirements.txt
 
-# ── 核心依赖 ──
-# MediaPipe 手势识别（锁定 0.10.14，新版移除了 solutions API）
+# --- Core dependencies ---
+# MediaPipe hand gesture recognition (pinned 0.10.14; newer versions removed the solutions API)
 mediapipe==0.10.14
 
-# 摄像头采集与图像处理
-# ⚠️ 必须用 contrib 版：auth.py 的人脸识别用到 cv2.face 模块（LBPHFaceRecognizer），
-# 它只包含在 opencv-contrib-python 中；请勿同时安装 opencv-python（二者会冲突覆盖）
+# Camera capture and image processing
+# IMPORTANT: must use the contrib build. auth.py face recognition uses cv2.face
+# (LBPHFaceRecognizer), which only ships in opencv-contrib-python.
+# Do NOT also install opencv-python (the two conflict and overwrite each other).
 opencv-contrib-python>=4.8.0
 
-# 数组运算（限制 <2.0 防止与 MediaPipe C 扩展冲突）
+# Array operations (keep <2.0.0 to avoid conflicts with MediaPipe C extensions)
 numpy>=1.24.0,<2.0.0
 
-# 中文文字渲染（Pillow；主程序 PIL 中文叠加时使用）
+# Chinese text rendering (Pillow; used for PIL Chinese overlays in the main app)
 Pillow>=10.0.0
 
-# GUI 界面框架
+# GUI framework
 PySide6>=6.6.0
 
-# ── 多模态升级依赖 ──
-# YOLO-World 物体检测（开放词汇；会随依赖自动安装 torch / torchvision）
+# --- Multimodal upgrade dependencies ---
+# YOLO-World open-vocabulary object detection (pulls torch / torchvision automatically)
 ultralytics
 
-# Kimi / Moonshot 大模型（OpenAI 兼容 API，代码使用 v1.x 的 client.chat.completions 接口，需 >=1.0.0）
+# Kimi / Moonshot LLM (OpenAI-compatible API; code uses the v1.x client.chat.completions interface, need >=1.0.0)
 openai>=1.0.0
 
-# 在线 TTS 语音播报（生成的 mp3 由 pygame mixer 播放）
+# Online TTS speech output (generated mp3 is played by the pygame mixer)
 edge-tts
 
-# TTS 音频播放
+# TTS audio playback
 pygame
 
-# ASR 语音识别（Faster-Whisper，CPU + INT8 量化，按需懒加载）
+# ASR speech recognition (Faster-Whisper, CPU + INT8 quantization, lazy-loaded on demand)
 faster-whisper
 
-# 实时麦克风录音（main.py 录音用 sounddevice + wave）
+# Live microphone recording (main.py uses sounddevice + wave)
 sounddevice
+python main.py
