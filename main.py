@@ -1612,9 +1612,16 @@ def _wrap_in_group(title, layout):
 
 def main():
     app = QApplication(sys.argv)
-    win = MainWindow()
-    win.show()
-    sys.exit(app.exec())
+    # 先弹出登录 / 注册入口；登录成功才进入主程序
+    from auth import AuthWindow
+    from PySide6.QtWidgets import QDialog
+    auth = AuthWindow()
+    if auth.exec() == QDialog.Accepted:
+        win = MainWindow()
+        win.show()
+        sys.exit(app.exec())
+    else:
+        sys.exit(0)
 
 
 if __name__ == "__main__":
