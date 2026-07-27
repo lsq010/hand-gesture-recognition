@@ -1604,38 +1604,60 @@ class HelpDialog(QDialog):
       <h3 style="color:#4a9eff;">⌨️ 快捷键</h3>
       <table cellspacing="6" cellpadding="4" border="0"
              style="border-collapse: collapse;">
-        <tr><td><b>Space</b></td><td>在 Kimi 对话 Tab 内：发送当前输入框文字</td></tr>
-        <tr><td><b>R</b></td><td>开始 4 秒录音 → ASR 听写 → 自动填入输入框并发送</td></tr>
-        <tr><td><b>Esc</b></td><td>关闭弹窗 / 退出程序</td></tr>
+        <tr><td><b>Space / R</b></td><td>在 Kimi 对话 Tab 内：开始 4 秒录音 → ASR 听写 → 自动填入并发送</td></tr>
+        <tr><td><b>Esc</b></td><td>关闭当前弹窗</td></tr>
+      </table>
+
+      <h3 style="color:#4a9eff;">💬 Kimi 对话区按钮</h3>
+      <table cellspacing="6" cellpadding="4" border="0"
+             style="border-collapse: collapse;">
+        <tr><td><b>🎤 语音</b></td><td>按住录音 4 秒，自动 ASR 识别文字填入输入框并发送给 Kimi</td></tr>
+        <tr><td><b>清空聊天</b></td><td>一键清除当前会话所有聊天记录（不可恢复）</td></tr>
+        <tr><td><b>导出历史对话</b></td><td>将当前会话聊天记录导出为 TXT 文件保存到本地</td></tr>
       </table>
 
       <h3 style="color:#4a9eff;">📖 手势含义字典</h3>
       <table cellspacing="3" cellpadding="3" border="1" style="border-color:#444; width:100%; font-size:12px;">
         <tr style="color:#4a9eff;"><th>手势</th><th>名称</th><th>含义</th></tr>
+        <tr><td>✊</td><td>握拳</td><td>坚持 / 加油 / 力量 / 团结</td></tr>
         <tr><td>👍</td><td>点赞</td><td>赞赏 / 棒 / 同意 / 没问题 / 搞定</td></tr>
         <tr><td>👎</td><td>拇指向下</td><td>差劲 / 反对 / 不同意 / 否定</td></tr>
-        <tr><td>👌</td><td>OK</td><td>好的 / 确定 / 没问题</td></tr>
-        <tr><td>✌️</td><td>胜利</td><td>胜利 / 和平 / 数字2</td></tr>
-        <tr><td>🖐️</td><td>张开手掌</td><td>停止 / 拒绝 / 稍等</td></tr>
-        <tr><td>☝️</td><td>食指竖起</td><td>提示注意 / 稍等一下 / 数字1</td></tr>
-        <tr><td>🤫</td><td>安静</td><td>保持安静 / 闭嘴 / 保密</td></tr>
-        <tr><td>🤙</td><td>打电话</td><td>联系我 / 打电话 / 呼叫</td></tr>
+        <tr><td>👌</td><td>OK / 确认</td><td>好的 / 确定 / 没问题</td></tr>
+        <tr><td>☝️</td><td>数字 1</td><td>提示注意 / 稍等一下 / 数字 1</td></tr>
+        <tr><td>✌️</td><td>数字 2</td><td>胜利 / 和平 / 数字 2</td></tr>
+        <tr><td>🖐️</td><td>数字 5</td><td>停止 / 拒绝 / 稍等</td></tr>
+        <tr><td>👉</td><td>指向</td><td>指示方向 / 指向某物</td></tr>
         <tr><td>🫰</td><td>比心</td><td>爱你 / 喜欢 / 感谢（小）</td></tr>
-        <tr><td>✊</td><td>握拳</td><td>坚持 / 加油 / 力量 / 团结</td></tr>
+        <tr><td>🤙</td><td>打电话</td><td>联系我 / 打电话 / 呼叫</td></tr>
         <tr><td>🫶</td><td>双手比心</td><td>表达爱意 / 感谢（大）</td></tr>
+        <tr><td>—</td><td>数字 3 / 4</td><td>数字 3 / 数字 4</td></tr>
       </table>
-      <p style="color:#aaa; font-size:11px;">（注：👌=OK、✌️=数字2、🖐️=数字5、☝️=数字1 在系统中以数字/OK 形式识别并附带上述语义；👍/👎 由拇指朝向识别；🫰 比心=拇指尖与食指尖靠拢成小环；🤙 打电话=仅拇指+小指伸直；🫶 双手比心由双手食指尖+拇指尖靠拢判定。）</p>
+      <p style="color:#aaa; font-size:11px;">（注：👌=OK、✌️=数字2、🖐️=数字5、☝️=数字1 在系统中以数字/OK 形式识别；👍/👎 由拇指朝向识别；🫰 比心=拇指尖与食指尖靠拢成小环；🤙 打电话=仅拇指+小指伸直；🫶 双手比心由双手食指尖+拇指尖靠拢判定。）</p>
+
+      <h3 style="color:#4a9eff;">🖐 动态手语</h3>
+      <table cellspacing="3" cellpadding="3" border="1" style="border-color:#444; width:100%; font-size:12px;">
+        <tr style="color:#4a9eff;"><th>动作</th><th>名称</th><th>说明</th></tr>
+        <tr><td>👋</td><td>挥手 Wave</td><td>打招呼 / 再见（水平来回摆动）</td></tr>
+        <tr><td>⭕</td><td>画圈 Circle</td><td>强调 / 画圈（掌心绕质心转一圈以上）</td></tr>
+        <tr><td>↔️ ↕️</td><td>划动 Swipe</td><td>向左 / 右 / 上 / 下 单向平移</td></tr>
+      </table>
 
       <h3 style="color:#4a9eff;">🖐 手势触发</h3>
       <ul>
-        <li><b>双手比心 (❤) 定格 1.5 秒</b>：触发一次 Kimi 对话（把当前手势/物体/语音作为上下文一并发送）</li>
-        <li><b>挥手 / 画圈 / 上划 / 下划 / 左划 / 右划</b>：动态手语，优先级高于静态手势</li>
-        <li><b>指向</b>：手腕→食指尖射线，结合 YOLO 框选命中物体</li>
+        <li><b>指向联动</b>：手腕→食指尖射线，结合 YOLO 框选命中物体，作为对话主语</li>
+        <li><b>动态手语优先</b>：挥手 / 画圈 / 划动 优先级高于静态手势</li>
+        <li><b>掌心轨迹线</b>：画面上实时绘制手掌移动轨迹，按手势染色（画圈青 / 挥手黄 / 划动紫），快速移动时线条连续不断</li>
+      </ul>
+
+      <h3 style="color:#4a9eff;">⚙ 显示设置</h3>
+      <ul>
+        <li><b>绘制手部骨架</b>：开关 21 关键点手部骨骼线（默认开）；进入小游戏后自动隐藏</li>
+        <li><b>画面镜像</b>：自拍模式左右翻转（默认开）</li>
       </ul>
 
       <h3 style="color:#4a9eff;">🧩 技术栈</h3>
       <ul>
-        <li>OpenCV（采集/画框）· MediaPipe Hands · Ultralytics YOLO-World</li>
+        <li>OpenCV（采集/画框，BUFFERSIZE=1 防卡顿）· MediaPipe Hands · Ultralytics YOLO-World</li>
         <li>Faster-Whisper（本地 ASR）· edge-tts（云端 TTS）· pygame 播放</li>
         <li>Kimi / Moonshot OpenAI 兼容 API（结构化文本模式）</li>
         <li>PySide6（GUI）· SQLite（历史/设置/手势字典）</li>
@@ -1644,9 +1666,10 @@ class HelpDialog(QDialog):
       <h3 style="color:#4a9eff;">❓ 常见问题</h3>
       <ul>
         <li>顶部黄色 Alert：本次会话尚未在「系统设置」粘贴并保存 Moonshot API Key 时显示。Key 仅存于内存、重启后失效，需重新输入。</li>
-        <li>保存配置会自动检测 Key：通过才保存；若返回 401 则提示「Key 错误」并拒绝保存。</li>
+        <li>保存配置会自动检测 Key 可用性并提示结果；检测失败的 Key 仍可保存，但交流时会提示错误。</li>
         <li>语音按钮灰：未打开摄像头或未安装 <code>faster-whisper</code>。</li>
         <li>无需打开摄像头即可与 Kimi 文字对话——只要先在「系统设置」保存有效 Key。</li>
+        <li>画面卡顿？已设摄像头缓冲区为 1 帧避免旧帧堆积；若仍卡可关闭骨架绘制降低负载。</li>
         <li>点击「❓ 使用手册」可随时再次打开本窗口。</li>
       </ul>
     </div>

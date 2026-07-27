@@ -16,7 +16,8 @@
 | **指向联动** | 手腕(0)→食指尖(8) 射线指向画面中的物体，作为语音指令的主语 |
 | **大模型对话** | 把「手势 + 指向物体 + 语音」结构化文本发给 Kimi，进行**纯对话交流**（不再只做语句润色），无 Key 时走规则兜底 |
 | **语音交互** | ASR 录音识别 + TTS 语音播报（可静音） |
-| **四标签页 UI** | 💬 Kimi 对话 / 🎯 实时监测（手势含义）/ ⚙ 系统设置 / 🎮 小游戏 |
+| **五标签页 UI** | 💬 Kimi 对话 / 🎯 实时监测（手势含义）/ ⚙ 系统设置 / 🎮 小游戏 |
+| **Kimi 对话增强** | 对话页含「🎤 语音」「清空聊天」「导出历史对话」三按钮；清空一键清除当前会话聊天记录，导出为 TXT 文件 |
 | **手部骨架 / 镜像** | 可开关的 21 关键点骨架绘制、自拍镜像翻转；**进入小游戏后自动隐藏手部骨骼线**，避免干扰游戏画面 |
 | **🎮 小游戏平台** | 可扩展的游戏列表（切水果等）；每局可选 **🌱简单 / ⚔️普通 / 🔥困难 / 💀地狱** 难度（炸弹出现频率递增、地狱开局即炸弹）；食指指尖在摄像头前划过切开水果，游戏中只显示食指指尖切线，不显示手掌 / 手指轨迹 |
 | **🔐 登录 / 注册入口** | 程序启动时先弹出登录窗口；支持**账号密码登录**与**人脸登录**（Haar 检测 + LBPH 识别，模型来自 `haar`），LBPH **匹配距离阈值 90（越小越像）**，识别前做 CLAHE 直方图均衡提升鲁棒性，识别成功后显示「识别为 xxx，即将登录…」并停留约 2 秒再进入主程序；注册需填写账号 / 密码 / 确认密码 / 人脸编号并录入人脸（≥5 张），密码以 pbkdf2 加盐哈希存储；未注册账号登录提示「登录失败，请注册」 |
@@ -118,7 +119,7 @@ Windows 用户也可直接双击 `run_gui.bat`。
 |------|------|
 | 左侧 | 摄像头画面（实时叠加骨架、掌心轨迹、动态手势染色；**进入小游戏后自动隐藏骨架、只显示食指指尖切线**）；关闭摄像头后回到纯黑 |
 | 顶部 | 「❓ 使用手册」按钮 + Kimi 状态告警条（宽 270px，缺 Key 黄 / 已配置 绿） |
-| 右侧（Tab 1 💬） | Kimi 对话：识别结果展示、发送按钮（纯对话，不再有预设场景） |
+| 右侧（Tab 1 💬） | Kimi 对话：识别结果展示、输入框 + 三按钮行（🎤 语音 / 清空聊天 / 导出历史对话 TXT）；清空一键清除当前会话聊天记录 |
 | 右侧（Tab 2 🎯） | 实时监测：左 / 右手势、手指数、方向、手势含义、环境物体 |
 | 右侧（Tab 3 ⚙） | 系统设置：开关（骨架 / 镜像）、数据记录（截图 / 保存 / 导出识别历史 CSV）、API 与配置（Key 输入，保存时自动检测） |
 | 右侧（Tab 4 🎮） | 小游戏：游戏列表 + 难度选择（🌱简单/⚔️普通/🔥困难/💀地狱）+ 游戏介绍 + 开始 / 暂停 / 结束按钮 + 当前局得分 / 生命 / 倒计时 HUD |
@@ -142,7 +143,7 @@ hand-gesture-recognition/
 ├── main.py                  # 主程序（PySide6 GUI 控制器 / 程序入口，含 CameraInitWorker 两阶段后台初始化线程）
 ├── rec.py                   # UI 代码（由 rec.ui 自动生成，勿手改）
 ├── rec.ui                   # Qt Designer UI 源文件
-├── vision_engine.py         # 视觉引擎：摄像头采集（CAP_DSHOW）+ MediaPipe Hands
+├── vision_engine.py         # 视觉引擎：摄像头采集（CAP_DSHOW, BUFFERSIZE=1）+ MediaPipe Hands
 ├── gesture_classifier.py    # 静态手势几何判定（Fist/OK/Num_1~5/ThumbUp/ThumbDown/FingerHeart/Phone…）
 ├── sequence_tracker.py      # 动态手语轨迹追踪（Wave/Circle/Swipe，转角+等周比判定，带丢手宽限期）
 ├── object_detector.py       # YOLO-World 开放词汇物品检测
@@ -154,10 +155,6 @@ hand-gesture-recognition/
 ├── check.png                # 复选框图标
 ├── requirements.txt         # Python 依赖
 ├── run_gui.bat              # Windows 一键启动（GUI 版）
-├── test_phase_a.py          # 冒烟测试：vision_engine 单帧识别
-├── test_phase_b.py          # 冒烟测试：vision_engine + sequence_tracker 动态手势
-├── test_phase_c.py          # 冒烟测试：vision_engine + object_detector 物品检测
-├── test_phase_d.py          # 冒烟测试：asr_tts + llm_client
 ├── .gitignore               # Git 忽略规则（含 weights/、yolov8s-world.pt、app_data.db、faces/、trainer.yml、auth.db 等生物特征与本地数据）
 ├── LICENSE                  # MIT 许可证
 └── README.md                # 项目说明（本文件）
@@ -167,7 +164,7 @@ hand-gesture-recognition/
 
 - **手势识别**：基于 MediaPipe Hands 的 21 个手部关键点，通过指尖相对位置、指间距离、手指计数判断静态手势；`SequenceTracker` 用掌心（Landmark 9）滑动窗口（默认 48 帧 ≈ 1.6s）做动态手势识别，并对 MediaPipe 偶发漏检设「丢手宽限期」（连续 8 帧丢手才清空轨迹），避免画圈时一漏检就断笔。
 - **动态手势区分（画圈 vs 挥手）**：用**绕轨迹质心累计有符号转角**（画圈≈±360°、挥手≈0）配合**等周比 circularity = 4π·面积 / 周长²**（圆≈1、来回≈0）双特征判定，取代旧版单一"面积"阈值，几乎不再互相误判；画圈需转角 > 198° 且圆度 > 0.2，挥手需 X 轴反转 ≥ 2 且路程 > 0.3。
-- **摄像头初始化（两阶段，不再卡）**：点击「打开摄像头」后在 `CameraInitWorker(QThread)` 后台线程运行，拆为两阶段信号——`cam_ready`（阶段1：仅 VisionEngine + MediaPipe，约 1 秒）立即回主线程出画面并启动实时循环；`extras_ready`（阶段2：YOLO-World / whisper / TTS / Kimi）在后台继续加载，就绪后挂上组件。Windows 端摄像头改用 `cv2.CAP_DSHOW` 后端，首帧延迟从数秒降到数百毫秒。UI 主线程全程不冻结。
+- **摄像头初始化（两阶段，不再卡）**：点击「打开摄像头」后在 `CameraInitWorker(QThread)` 后台线程运行，拆为两阶段信号——`cam_ready`（阶段1：仅 VisionEngine + MediaPipe，约 1 秒）立即回主线程出画面并启动实时循环；`extras_ready`（阶段2：YOLO-World / whisper / TTS / Kimi）在后台继续加载，就绪后挂上组件。Windows 端摄像头改用 `cv2.CAP_DSHOW` 后端并设 `CAP_PROP_BUFFERSIZE=1`（只保留最新帧），首帧延迟从数秒降到数百毫秒且避免处理耗时导致画面卡顿。UI 主线程全程不冻结。
 - **指向联动**：由手腕关键点 (0) 指向食指尖 (8) 发出射线，与画面中 YOLO 检测框求交，将"用户指着的物体"作为语音/大模型指令的主语，实现自然的"指向 + 说话"组合指令。
 - **图形界面**：PySide6（Qt for Python），`QTimer` 驱动帧循环，避免 `while True` 阻塞 UI。
 - **中文渲染**：识别结果的中文通过 PySide6 控件（如 QLabel）展示；画面叠加的英文标识（状态 / 手势缩写）使用 OpenCV `putText`，项目已不再依赖 Pillow/PIL。
@@ -217,8 +214,8 @@ A: 当前版本未提供图形化账号管理。可直接删除 `auth.db` 重置
 **Q: 物体检测无反应？**  
 A: 确认根目录有 `yolov8s-world.pt`，且首次运行可联网（会自动下载 CLIP 权重到 `weights/clip/`）。
 
-**Q: 点击「打开摄像头」后画面出来很慢？**  
-A: 已优化为两阶段后台初始化——点击后约 1 秒即可看到手势画面（阶段1：摄像头 + 手势引擎）；YOLO 物体检测 / 语音等重模型在后台约 10 秒自动就绪，期间画面与手势照常可用，不再冻结界面。状态栏会先显示"手势识别中（物体检测/语音后台加载中…）"，就绪后变为"全部组件就绪"。
+**Q: 摄像头画面卡顿 / 延迟明显？**  
+A: 已设 `CAP_PROP_BUFFERSIZE=1`（只保留最新一帧），避免 MediaPipe/绘制耗时超过帧间隔时 OpenCV 内部缓冲区堆积旧帧导致滞后。若仍有延迟，可尝试降低分辨率或关闭骨架绘制。
 
 **Q: 导出的识别历史 CSV 是空的 / 看不到上次的记录？**  
 A: 出于隐私与轻量考虑，识别历史只在**本次会话**内保留；**关闭程序时自动清空 logs 表**，重新打开后从空白开始。在本会话内打开摄像头、做几次手势识别（实时监测会"识别即记录"），再到「⚙ 系统设置 → 数据记录 → 导出」选择保存位置即可导出 CSV。
