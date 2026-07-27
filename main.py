@@ -487,9 +487,11 @@ class MainWindow(QWidget):
         self.chatInput.setPlaceholderText("输入文字，回车或点「发送」与 Kimi 交流…")
         self.sendButton = QPushButton("发送")
         self.voiceButton = QPushButton("🎤 语音")
+        self.exportChatButton = QPushButton("导出历史对话")
         input_row.addWidget(self.chatInput, stretch=3)
         input_row.addWidget(self.sendButton, stretch=1)
         input_row.addWidget(self.voiceButton, stretch=1)
+        input_row.addWidget(self.exportChatButton, stretch=1)
         chat_layout.addLayout(input_row)
 
         tab_chat_layout.addWidget(self.chatGroup, stretch=3)
@@ -544,8 +546,8 @@ class MainWindow(QWidget):
         hist_btn_row = QHBoxLayout()
         self.refreshHistButton = QPushButton("刷新历史")
         self.refreshHistButton.clicked.connect(self._refresh_history)
-        self.exportHistButton = QPushButton("导出对话")
-        self.exportHistButton.clicked.connect(self._export_chat_txt)
+        self.exportHistButton = QPushButton("导出 CSV")
+        self.exportHistButton.clicked.connect(self._export_history_csv)
         hist_btn_row.addWidget(self.refreshHistButton)
         hist_btn_row.addWidget(self.exportHistButton)
         hist_btn_row.addStretch(1)
@@ -1008,6 +1010,7 @@ class MainWindow(QWidget):
         self.sendButton.clicked.connect(self.send_chat)
         self.chatInput.returnPressed.connect(self.send_chat)
         self.voiceButton.clicked.connect(self.start_voice_input)
+        self.exportChatButton.clicked.connect(self._export_chat_txt)
 
         self.helpButton.clicked.connect(self._show_help_dialog)
     
