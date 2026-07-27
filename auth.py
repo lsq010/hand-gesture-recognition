@@ -3,7 +3,7 @@
 # --------------------------------------------------------------
 # 提供 AuthWindow（登录 + 注册 对话框），在 main.py 启动 MainWindow 之前弹出。
 # - 密码登录：账号 + 密码（pbkdf2 加盐哈希，存于 SQLite auth.db）
-# - 人脸登录 / 人脸录入：使用 D:\Desk\test\haar 下的 Haar 级联做人脸检测，
+# - 人脸登录 / 人脸录入：使用项目内 haar/ 目录下的 Haar 级联做人脸检测，
 #   用 OpenCV LBPH 人脸识别器训练 / 预测（trainer.yml）。
 # 未注册账号登录 → 提示「登录失败，请注册」；注册需录入人脸编号，保存成功 → 注册成功。
 
@@ -26,8 +26,9 @@ from PySide6.QtWidgets import (
 
 # ── 路径 ────────────────────────────────────────────────────────
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_DIR = os.path.dirname(SCRIPT_DIR)          # D:\Desk\test
-HAAR_DIR = os.path.join(PROJECT_DIR, "haar")
+# Haar 级联模型随仓库一起提交（haar/haarcascade_frontalface_default.xml），
+# 用相对路径，保证克隆到任意机器后都能找到。
+HAAR_DIR = os.path.join(SCRIPT_DIR, "haar")
 HAAR_FACE = os.path.join(HAAR_DIR, "haarcascade_frontalface_default.xml")
 
 AUTH_DB = os.path.join(SCRIPT_DIR, "auth.db")
