@@ -980,7 +980,7 @@ class MainWindow(QWidget):
         self.ui.screenshotButton.clicked.connect(self._on_screenshot_toggle)
         self.ui.saveButton.setEnabled(False)
         self.ui.saveButton.clicked.connect(self._on_save_snapshot)
-        self.ui.exportButton.clicked.connect(self.export_chat)
+        self.ui.exportButton.clicked.connect(self._export_history_csv)
     
         self.sendButton.clicked.connect(self.send_chat)
         self.chatInput.returnPressed.connect(self.send_chat)
@@ -1531,26 +1531,6 @@ class MainWindow(QWidget):
         else:
             self.statusBar_show("截图保存失败")
 
-    def export_chat(self):
-        """弹出保存对话框，导出当前对话记录为 TXT。"""
-        default_name = f"chat_log_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.txt"
-        path, _ = QFileDialog.getSaveFileName(
-            self,
-            "导出对话记录",
-            os.path.join(os.getcwd(), default_name),
-            "文本文件 (*.txt);;所有文件 (*)",
-        )
-        if not path:
-            return
-        if not path.lower().endswith(".txt"):
-            path += ".txt"
-        try:
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(self.chatHistory.toPlainText())
-            self.statusBar_show(f"对话记录已导出: {path}")
-        except Exception as e:  # noqa: BLE001
-            self.statusBar_show(f"导出失败: {e}")
-    
     # ------------------------------------------------------------------ #
     def statusBar_show(self, text):
         self.ui.statusBar.setText(f"状态栏：{text}")
