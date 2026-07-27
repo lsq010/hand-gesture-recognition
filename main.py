@@ -482,17 +482,29 @@ class MainWindow(QWidget):
         )
         chat_layout.addWidget(self.chatHistory)
 
+        # 输入区域拆为两行，避免按钮过多显示不全
+        input_layout = QVBoxLayout()
+        input_layout.setSpacing(6)
+
+        # 第一行：输入框占主要宽度，右侧只放发送按钮
         input_row = QHBoxLayout()
         self.chatInput = QLineEdit()
         self.chatInput.setPlaceholderText("输入文字，回车或点「发送」与 Kimi 交流…")
         self.sendButton = QPushButton("发送")
+        input_row.addWidget(self.chatInput, stretch=1)
+        input_row.addWidget(self.sendButton, stretch=0)
+        input_layout.addLayout(input_row)
+
+        # 第二行：语音 + 导出历史对话
+        btn_row = QHBoxLayout()
         self.voiceButton = QPushButton("🎤 语音")
         self.exportChatButton = QPushButton("导出历史对话")
-        input_row.addWidget(self.chatInput, stretch=3)
-        input_row.addWidget(self.sendButton, stretch=1)
-        input_row.addWidget(self.voiceButton, stretch=1)
-        input_row.addWidget(self.exportChatButton, stretch=1)
-        chat_layout.addLayout(input_row)
+        btn_row.addWidget(self.voiceButton, stretch=0)
+        btn_row.addWidget(self.exportChatButton, stretch=0)
+        btn_row.addStretch(1)
+        input_layout.addLayout(btn_row)
+
+        chat_layout.addLayout(input_layout)
 
         tab_chat_layout.addWidget(self.chatGroup, stretch=3)
 
