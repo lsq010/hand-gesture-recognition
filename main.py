@@ -873,11 +873,6 @@ class MainWindow(QWidget):
             return
         try:
             import csv
-            logs = get_logs(limit=2000, order="ASC")
-            if not logs:
-                self.statusBar_show("暂无历史记录可导出")
-                return
-
             default_name = f"history_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.csv"
             path, _ = QFileDialog.getSaveFileName(
                 self,
@@ -890,6 +885,7 @@ class MainWindow(QWidget):
             if not path.lower().endswith(".csv"):
                 path += ".csv"
 
+            logs = get_logs(limit=2000, order="ASC")
             with open(path, "w", encoding="utf-8-sig", newline="") as f:
                 w = csv.writer(f)
                 w.writerow(["时间", "手势", "物体", "翻译文本"])
@@ -905,10 +901,15 @@ class MainWindow(QWidget):
                         log.get("yolo_object") or "",
                         log.get("translation_text") or "",
                     ])
-            self.statusBar_show(
-                f"历史已导出到: {path}；Excel 中若时间列显示 #"
-                "请拖动列宽或双击列分隔线自适应"
-            )
+            if not logs:
+                self.statusBar_show(
+                    f"本次会话暂无识别记录，已导出空表（仅表头）到: {path}"
+                )
+            else:
+                self.statusBar_show(
+                    f"历史已导出到: {path}；Excel 中若时间列显示 #"
+                    "请拖动列宽或双击列分隔线自适应"
+                )
         except Exception as e:  # noqa: BLE001
             self.statusBar_show(f"导出失败: {e}")
 
