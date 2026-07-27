@@ -356,6 +356,8 @@ class MainWindow(QWidget):
     def __init__(self, username="你"):
         super().__init__()
         self.username = username or "你"
+        # 退出登录 / 注销用户时置 True，主循环据此返回登录界面而非退出程序
+        self._return_to_login = False
         if Ui_Form is None:
             raise RuntimeError("rec.Ui_Form 未找到，无法加载界面")
         self.ui = Ui_Form()
@@ -566,6 +568,20 @@ class MainWindow(QWidget):
         cfg_btn_row.addStretch(1)
         cfg_layout.addLayout(cfg_btn_row)
         tab_sys_layout.addWidget(cfg_group)
+
+        # === 👤 账号操作（退出登录 / 注销用户） ===
+        acct_group = QGroupBox("👤 账号操作")
+        acct_layout = QHBoxLayout(acct_group)
+        acct_layout.setSpacing(10)
+        self.logoutButton = QPushButton("🚪 退出登录")
+        self.logoutButton.setToolTip("返回登录界面，当前账号数据保留")
+        self.logoutButton.clicked.connect(self._logout)
+        self.deleteAccountButton = QPushButton("🗑️ 注销用户")
+        self.deleteAccountButton.setToolTip("删除当前账号及人脸数据，不可恢复")
+        self.deleteAccountButton.clicked.connect(self._delete_account)
+        acct_layout.addWidget(self.logoutButton)
+        acct_layout.addWidget(self.deleteAccountButton)
+        tab_sys_layout.addWidget(acct_group)
 
         tab_sys_layout.addStretch(1)
         self.rightTabs.addTab(tab_sys, "⚙ 系统设置")
@@ -875,6 +891,77 @@ class MainWindow(QWidget):
         """清空与 Kimi 的聊天记录。"""
         self.chatHistory.clear()
         self.statusBar_show("聊天记录已清空")
+
+    # ---- 账号操作 ----
+    def _logout(self):
+        """退出登录：关闭主窗口，返回登录界面。"""
+        reply = QMessageBox.question(
+            self, "退出登录",
+            f"确定退出当前账号（{self.username}）吗？",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+        self._return_to_login = True
+        self.close()  # closeEvent 会清理资源；__main__ 会重新弹出 AuthWindow
+
+    def _delete_account(self):
+        """注销用户：删除当前账号、人脸数据、重训练模型，返回登录界面。"""
+        reply = QMessageBox.warning(
+            self, "⚠️ 注销用户",
+            f"即将删除账号「{self.username}」及其全部人脸数据，此操作不可恢复！\n\n"
+            "确定要注销吗？",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        try:
+            from auth import AuthDB, FaceEngine, FACES_DIR, TRAINER_PATH
+            import os, glob as _glob
+
+            db = AuthDB()
+            # 1) 查出该用户的人脸编号
+            cur = db.conn.execute(
+                "SELECT face_label FROM users WHERE username=?", (self.username,)
+            )
+            row = cur.fetchone()
+            face_label = row[0] if row else None
+
+            # 2) 从 auth.db 删除用户记录
+            db.conn.execute("DELETE FROM users WHERE username=?", (self.username,))
+            db.conn.commit()
+            db.close()
+
+            # 3) 删除人脸图片（faces/face_<label>_*.jpg）
+            if face_label is not None:
+                pattern = os.path.join(FACES_DIR, f"face_{face_label}_*.jpg")
+                for f in _glob.glob(pattern):
+                    try:
+                        os.remove(f)
+                    except Exception:
+                        pass
+
+            # 4) 重新训练识别器（排除已删人脸）
+            try:
+                engine = FaceEngine()
+                engine.train_all()
+            except Exception:
+                pass  # 无剩余样本时 train_all 返回 False，正常
+
+            QMessageBox.information(
+                self, "注销完成",
+                f"账号「{self.username}」已注销，即将返回登录界面。",
+            )
+            self._return_to_login = True
+            self.close()  # __main__ 会重新弹出 AuthWindow
+
+        except Exception as e:
+            QMessageBox.critical(
+                self, "注销失败", f"注销过程中出错：\n{e}",
+            )
 
     def _export_chat_txt(self):
         """弹出保存对话框，把与 Kimi 的对话记录导出为 TXT。"""
@@ -1655,6 +1742,15 @@ class HelpDialog(QDialog):
         <li><b>画面镜像</b>：自拍模式左右翻转（默认开）</li>
       </ul>
 
+      <h3 style="color:#4a9eff;">👤 账号操作</h3>
+      <p style="color:#aaa; font-size:12px;">位于「⚙ 系统设置 → 👤 账号操作」分组，两个按钮并排：</p>
+      <table cellspacing="4" cellpadding="4" border="1" style="border-color:#444; width:100%; font-size:12px;">
+        <tr style="color:#4a9eff;"><th>按钮</th><th>说明</th><th>后效</th></tr>
+        <tr><td>🚪 退出登录</td><td>弹窗确认后，保存的账号数据<b>保留</b></td><td>关闭主窗口、返回<b>登录界面</b>（输账号密码），程序不退出，可换号重登</td></tr>
+        <tr><td>🗑️ 注销用户</td><td>二次警告确认（不可恢复）后，删除该账号的数据库记录与对应人脸图片 <code>faces/face_&lt;编号&gt;_*.jpg</code>，并重训练识别模型</td><td>关闭主窗口、返回<b>登录界面</b>；该账号及其人脸数据已永久删除</td></tr>
+      </table>
+      <p style="color:#aaa; font-size:11px;">（注：点右上角 ✕ 关闭主窗口会直接退出程序；只有「退出登录 / 注销用户」才会回到登录界面。）</p>
+
       <h3 style="color:#4a9eff;">🧩 技术栈</h3>
       <ul>
         <li>OpenCV（采集/画框，BUFFERSIZE=1 防卡顿）· MediaPipe Hands · Ultralytics YOLO-World</li>
@@ -1670,6 +1766,7 @@ class HelpDialog(QDialog):
         <li>语音按钮灰：未打开摄像头或未安装 <code>faster-whisper</code>。</li>
         <li>无需打开摄像头即可与 Kimi 文字对话——只要先在「系统设置」保存有效 Key。</li>
         <li>画面卡顿？已设摄像头缓冲区为 1 帧避免旧帧堆积；若仍卡可关闭骨架绘制降低负载。</li>
+        <li>退出登录 / 注销用户后会回到登录界面（输账号密码），程序不退出；仅点主窗口 ✕ 才会真正退出。</li>
         <li>点击「❓ 使用手册」可随时再次打开本窗口。</li>
       </ul>
     </div>
@@ -1765,16 +1862,24 @@ def main():
     if getattr(sys, "frozen", False):
         os.chdir(os.path.dirname(sys.executable))
     app = QApplication(sys.argv)
-    # 先弹出登录 / 注册入口；登录成功才进入主程序
     from auth import AuthWindow
     from PySide6.QtWidgets import QDialog
-    auth = AuthWindow()
-    if auth.exec() == QDialog.Accepted:
+
+    # 登录 ⇄ 主窗口 循环：
+    #   - 退出登录 / 注销用户 → MainWindow 关闭时置 _return_to_login=True
+    #     → 回到登录界面（输入账号密码），程序不退出
+    #   - 普通点 X 关闭主窗口 → _return_to_login 为 False → 真正退出
+    while True:
+        auth = AuthWindow()
+        if auth.exec() != QDialog.Accepted:
+            break  # 用户在登录界面点了取消/关闭 → 退出程序
         win = MainWindow(username=auth.logged_in_user or "你")
         win.show()
-        sys.exit(app.exec())
-    else:
-        sys.exit(0)
+        app.exec()
+        if not getattr(win, "_return_to_login", False):
+            break  # 普通关闭 → 退出程序
+        # 否则（退出登录/注销）回到循环顶部，重新弹登录界面
+    sys.exit(0)
 
 
 if __name__ == "__main__":
