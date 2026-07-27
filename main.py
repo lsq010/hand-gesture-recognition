@@ -8,6 +8,7 @@
 # 这样既能实时展示手势/物品，又能通过键盘输入文字与 Kimi 进行交流。
 
 import os
+import re
 import sys
 import time
 import threading
@@ -1339,7 +1340,7 @@ class MainWindow(QWidget):
     def _on_chat_done(self, translated, intent):
         self._remove_chat_thinking()
         self.chatHistory.append(
-            f"<b>助手：</b>{_esc(translated)} "
+            f"<b>助手：</b>{_md_to_html(translated)} "
             f"<span style='color:#ffd700;'>[意图: {_esc(intent)}]</span>"
         )
         self.chatHistory.append("")  # 空行分隔
@@ -1619,6 +1620,38 @@ class HelpDialog(QDialog):
 def _esc(text):
     """转义 HTML 特殊字符，避免聊天框渲染错乱。"""
     return (text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+
+
+def _md_to_html(text: str) -> str:
+    """极简 Markdown → HTML：支持加粗、斜体、行内代码、换行。
+
+    用于把 Kimi 返回的 Markdown 文本转换成 QTextEdit 能直接渲染的 HTML。
+    """
+    s = _esc(text)
+    codes = []
+
+    def _save_code(m):
+        codes.append(m.group(1))
+        return f"\x00CODE{len(codes) - 1}\x00"
+
+    # 先保护行内代码，避免其中的 * 被误判为加粗/斜体
+    s = re.sub(r"`([^`]+)`", _save_code, s)
+    # 加粗 **...**
+    s = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", s)
+    # 斜体 *...*
+    s = re.sub(r"\*(.+?)\*", r"<i>\1</i>", s)
+
+    def _restore_code(m):
+        idx = int(m.group(1))
+        return (
+            f"<code style='background:#2a2a2a; padding:2px 4px; "
+            f"border-radius:3px; color:#ffcc66;'>"
+            f"{codes[idx]}"
+            f"</code>"
+        )
+
+    s = re.sub(r"\x00CODE(\d+)\x00", _restore_code, s)
+    return s.replace("\n", "<br>")
 
 
 def main():
