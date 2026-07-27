@@ -542,8 +542,8 @@ class MainWindow(QWidget):
         hist_btn_row = QHBoxLayout()
         self.refreshHistButton = QPushButton("刷新历史")
         self.refreshHistButton.clicked.connect(self._refresh_history)
-        self.exportHistButton = QPushButton("导出 CSV")
-        self.exportHistButton.clicked.connect(self._export_history_csv)
+        self.exportHistButton = QPushButton("导出对话")
+        self.exportHistButton.clicked.connect(self._export_chat_txt)
         hist_btn_row.addWidget(self.refreshHistButton)
         hist_btn_row.addWidget(self.exportHistButton)
         hist_btn_row.addStretch(1)
@@ -909,6 +909,26 @@ class MainWindow(QWidget):
                 f"历史已导出到: {path}；Excel 中若时间列显示 #"
                 "请拖动列宽或双击列分隔线自适应"
             )
+        except Exception as e:  # noqa: BLE001
+            self.statusBar_show(f"导出失败: {e}")
+
+    def _export_chat_txt(self):
+        """弹出保存对话框，把与 Kimi 的对话记录导出为 TXT。"""
+        default_name = f"chat_log_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.txt"
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "导出对话记录",
+            os.path.join(os.getcwd(), default_name),
+            "文本文件 (*.txt);;所有文件 (*)",
+        )
+        if not path:
+            return
+        if not path.lower().endswith(".txt"):
+            path += ".txt"
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(self.chatHistory.toPlainText())
+            self.statusBar_show(f"对话记录已导出: {path}")
         except Exception as e:  # noqa: BLE001
             self.statusBar_show(f"导出失败: {e}")
 
