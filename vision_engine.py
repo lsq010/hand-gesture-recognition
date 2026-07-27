@@ -38,6 +38,7 @@ class VisionEngine:
         )
         self.mp_draw = mp.solutions.drawing_utils
         self.classifier = GestureClassifier()
+        self.draw_skeleton = True  # 主程序可在游戏模式置 False，自动隐藏手部骨骼
 
     def process_frame(self):
         """
@@ -68,8 +69,9 @@ class VisionEngine:
 
         if results.multi_hand_landmarks and results.multi_handedness:
             for hand_lms, handedness in zip(results.multi_hand_landmarks, results.multi_handedness):
-                # 绘制手部骨骼
-                self.mp_draw.draw_landmarks(frame, hand_lms, self.mp_hands.HAND_CONNECTIONS)
+                # 绘制手部骨骼（游戏中主程序会置 draw_skeleton=False 自动隐藏）
+                if self.draw_skeleton:
+                    self.mp_draw.draw_landmarks(frame, hand_lms, self.mp_hands.HAND_CONNECTIONS)
 
                 # MediaPipe 的左右手标签 (由于图像已翻转，需注意对应)
                 hand_label = handedness.classification[0].label  # "Left" 或 "Right"

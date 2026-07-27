@@ -49,6 +49,14 @@ try:
 except Exception as _llm_err:  # noqa: BLE001
     KimiLLMClient = None
     print(f">>> [LLM] llm_client 模块不可用，Kimi 对话将关闭: {_llm_err}")
+
+# 切水果小游戏平台（纯 Qt + cv2，无外部依赖）
+try:
+    from fruit_game import GameHubWidget, FruitSliceController
+except Exception as _game_err:  # noqa: BLE001
+    GameHubWidget = None
+    FruitSliceController = None
+    print(f">>> [Game] fruit_game 模块不可用: {_game_err}")
 ASRManager = None
 TTSManager = None
 try:
@@ -574,6 +582,27 @@ class MainWindow(QWidget):
         tab_sys_layout.addStretch(1)
         self.rightTabs.addTab(tab_sys, "⚙ 系统设置")
 
+        # ── 🎮 小游戏 Tab ──
+        if GameHubWidget is not None and FruitSliceController is not None:
+            self.game_hub = GameHubWidget()
+            self.game_controller = FruitSliceController(parent=self)
+            # 游戏按钮回调
+            self.game_hub.on_start = self._on_game_start
+            self.game_hub.on_pause = self._on_game_pause
+            self.game_hub.on_end = self._on_game_end
+            # 控制器信号 → UI 更新
+            self.game_controller.score_changed.connect(self.game_hub.update_score)
+            self.game_controller.lives_changed.connect(self.game_hub.update_lives)
+            self.game_controller.time_changed.connect(self.game_hub.update_time)
+            self.game_controller.state_changed.connect(self.game_hub.set_game_state)
+            self.game_controller.game_over.connect(self._on_game_over)
+            self.rightTabs.addTab(self.game_hub, "🎮 小游戏")
+        else:
+            tab_game = QWidget()
+            tab_game_layout = QVBoxLayout(tab_game)
+            tab_game_layout.addWidget(QLabel("小游戏模块加载失败，请检查 fruit_game.py"))
+            self.rightTabs.addTab(tab_game, "🎮 小游戏")
+
         right.addWidget(self.rightTabs, stretch=1)
 
         # 默认进入「系统设置」Tab；开摄像头时自动切到「实时监测（手势含义）」
@@ -967,11 +996,19 @@ class MainWindow(QWidget):
         self._running = True
         self.timer.start(33)  # ~30 FPS
         self.statusBar_show("摄像头已开启 | 手势识别中（物体检测/语音后台加载中…）")
-        # 自动切到「实时监测（手势含义）」Tab，开摄像头先看手势/含义
-        try:
-            self.rightTabs.setCurrentIndex(1)
-        except Exception:  # noqa: BLE001
-            pass
+
+        # 若用户是从「小游戏」触发开摄像头，开好后立即开始游戏并切到游戏 Tab；
+        # 普通「打开摄像头」不自动跳转，留在当前 Tab，由用户自行选择查看哪个页面。
+        pending = getattr(self, "_pending_game", None)
+        if pending:
+            self._pending_game = None
+            gc = getattr(self, "game_controller", None)
+            if gc is not None:
+                gc.start(self.game_hub.get_difficulty())
+            try:
+                self.rightTabs.setCurrentIndex(self.rightTabs.count() - 1)
+            except Exception:  # noqa: BLE001
+                pass
 
     def _on_extras_ready(self, obj, llm, tts, asr):
         """阶段2完成：YOLO 物体检测 / ASR / TTS / Kimi 全部就绪，挂到主窗口启用。
@@ -1001,10 +1038,45 @@ class MainWindow(QWidget):
         self.statusBar_show(f"摄像头初始化失败: {msg}")
         self.ui.openCamButton.setEnabled(True)
         self.ui.closeCamButton.setEnabled(False)
-    
+
+    # ------------------------------------------------------------------ #
+    #  小游戏：切水果
+    # ------------------------------------------------------------------ #
+    def _on_game_start(self, game_id: str):
+        """用户点「开始游戏」。如果摄像头没开，先自动打开。"""
+        if game_id != "fruit_slice":
+            return
+        if not self._running:
+            # 摄像头未开 → 先打开，标记待启动游戏
+            self._pending_game = game_id
+            self.game_hub.statusLabel.setText("⏳ 正在打开摄像头，请稍候...")
+            self.game_hub.statusLabel.setStyleSheet(
+                "color: #FF9800; font-size: 12px; font-weight: bold;"
+            )
+            self.start_camera()
+            return
+        # 摄像头已开 → 直接开始
+        self.game_controller.start(self.game_hub.get_difficulty())
+
+    def _on_game_pause(self):
+        """暂停 / 继续。"""
+        self.game_controller.pause()
+
+    def _on_game_end(self):
+        """手动结束游戏。"""
+        self.game_controller.end()
+
+    def _on_game_over(self, reason: str, score: int):
+        """游戏自然结束（时间到 / 生命耗尽）。"""
+        self.game_hub.show_game_over(reason, score)
+
     def stop_camera(self):
         self._running = False
         self.timer.stop()
+        # 游戏进行中关闭摄像头 → 强制结束游戏，避免状态卡在 running
+        gc = getattr(self, "game_controller", None)
+        if gc is not None and gc.is_running:
+            gc.end()
         if self.obj is not None:
             try:
                 self.obj.stop()
@@ -1067,6 +1139,9 @@ class MainWindow(QWidget):
         frame = None
         parsed = {}
         if self.vision is not None:
+            # 游戏模式下自动隐藏手部骨骼线；非游戏模式按用户设置开关决定
+            in_game = hasattr(self, "game_controller") and self.game_controller.is_running
+            self.vision.draw_skeleton = self.ui.drawSkeletonCheck.isChecked() and not in_game
             frame, parsed = self.vision.process_frame()
         elif self.cap_fallback is not None:
             ret, f = self.cap_fallback.read()
@@ -1149,7 +1224,17 @@ class MainWindow(QWidget):
             self.ui.meaningLabelValue.setText(live_meaning)
 
         # ---- Phase B 恢复：掌心轨迹线 + 动态手势名 ----
-        self._draw_palm_trail_and_dynamic(frame, dyn)
+        # 游戏进行中：不画手掌/手指轨迹线，只保留切水果的「食指指尖轨迹」
+        # （由 game_controller.update_and_draw 绘制），满足「只显示食指最上方画出的线条」。
+        if not (hasattr(self, "game_controller") and self.game_controller.is_running):
+            self._draw_palm_trail_and_dynamic(frame, dyn)
+
+        # ---- 小游戏：切水果在摄像头画面上叠加 ----
+        if hasattr(self, "game_controller") and self.game_controller.is_running:
+            # 用真实帧间隔（限幅），避免首帧 _fps=0 时 dt=1s 把倒计时瞬间扣掉 1 秒
+            real_dt = time.time() - self._last_tick
+            dt = min(max(real_dt, 0.0), 0.1)
+            self.game_controller.update_and_draw(frame, parsed, dt)
 
         # ---- 左侧画面 ----
         pix = cv2_to_pixmap(frame, self.ui.camLabel.width(), self.ui.camLabel.height())
