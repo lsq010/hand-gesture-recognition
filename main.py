@@ -579,7 +579,7 @@ class MainWindow(QWidget):
         right.addWidget(self.rightTabs, stretch=1)
 
         # 默认进入「系统设置」Tab；开摄像头时自动切到「实时监测（手势含义）」
-        self.rightTabs.setCurrentIndex(3)
+        self.rightTabs.setCurrentIndex(2)
 
     # ------------------------------------------------------------------ #
     # ------------------------------------------------------------------ #
@@ -693,7 +693,7 @@ class MainWindow(QWidget):
 
         # 4) 跳转到系统设置 Tab + 焦点给输入框 + 改 placeholder 提示
         if hasattr(self, "rightTabs"):
-            self.rightTabs.setCurrentIndex(3)  # 系统设置 Tab
+            self.rightTabs.setCurrentIndex(2)  # 系统设置 Tab（删历史页后索引为 2）
         if hasattr(self, "apiKeyEdit"):
             self.apiKeyEdit.setPlaceholderText(
                 "👉 请在这里粘贴 Moonshot API Key（sk-…），然后点「保存配置」"
