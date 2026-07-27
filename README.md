@@ -164,8 +164,6 @@ hand-gesture-recognition/
 └── README.md                # 项目说明（本文件）
 ```
 
-> 早期遗留文件（`gesture_recognition.py` 终端版、`multimodal_panel.py` 废弃面板、`gestures.db` 旧库、`setup.py` 无效打包、`run_gesture.bat`）已从仓库移除，不再维护。
-
 ## 技术说明
 
 - **手势识别**：基于 MediaPipe Hands 的 21 个手部关键点，通过指尖相对位置、指间距离、手指计数判断静态手势；`SequenceTracker` 用掌心（Landmark 9）滑动窗口（默认 48 帧 ≈ 1.6s）做动态手势识别，并对 MediaPipe 偶发漏检设「丢手宽限期」（连续 8 帧丢手才清空轨迹），避免画圈时一漏检就断笔。
