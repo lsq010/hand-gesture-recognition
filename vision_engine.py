@@ -27,6 +27,13 @@ class VisionEngine:
         else:
             self.cap = cv2.VideoCapture(camera_index)
 
+        # 只保留最新一帧：避免 MediaPipe/绘制耗时超过帧间隔时，
+        # OpenCV 内部缓冲区堆积旧帧导致画面明显滞后（卡顿）。
+        try:
+            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        except Exception:  # noqa: BLE001
+            pass
+
         # 初始化 MediaPipe Hands (补上 model_complexity=0 榨干 CPU 性能)
         self.mp_hands = mp.solutions.hands
         self.hands = self.mp_hands.Hands(

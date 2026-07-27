@@ -496,11 +496,13 @@ class MainWindow(QWidget):
         input_row.addWidget(self.sendButton, stretch=0)
         input_layout.addLayout(input_row)
 
-        # 第二行：语音 + 导出历史对话
+        # 第二行：语音 + 清空聊天 + 导出历史对话
         btn_row = QHBoxLayout()
         self.voiceButton = QPushButton("🎤 语音")
+        self.clearChatButton = QPushButton("清空聊天")
         self.exportChatButton = QPushButton("导出历史对话")
         btn_row.addWidget(self.voiceButton, stretch=0)
+        btn_row.addWidget(self.clearChatButton, stretch=0)
         btn_row.addWidget(self.exportChatButton, stretch=0)
         btn_row.addStretch(1)
         input_layout.addLayout(btn_row)
@@ -869,6 +871,11 @@ class MainWindow(QWidget):
         except Exception as e:  # noqa: BLE001
             self.statusBar_show(f"导出失败: {e}")
 
+    def _clear_chat(self):
+        """清空与 Kimi 的聊天记录。"""
+        self.chatHistory.clear()
+        self.statusBar_show("聊天记录已清空")
+
     def _export_chat_txt(self):
         """弹出保存对话框，把与 Kimi 的对话记录导出为 TXT。"""
         default_name = f"chat_log_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.txt"
@@ -945,6 +952,7 @@ class MainWindow(QWidget):
         self.sendButton.clicked.connect(self.send_chat)
         self.chatInput.returnPressed.connect(self.send_chat)
         self.voiceButton.clicked.connect(self.start_voice_input)
+        self.clearChatButton.clicked.connect(self._clear_chat)
         self.exportChatButton.clicked.connect(self._export_chat_txt)
 
         self.helpButton.clicked.connect(self._show_help_dialog)
@@ -1158,7 +1166,7 @@ class MainWindow(QWidget):
         # 镜像开关
         if not self.ui.mirrorCheck.isChecked():
             frame = cv2.flip(frame, 1)
-    
+
         # 动态 + 静态手势合并
         if self.tracker is not None:
             self.tracker.update(
@@ -1321,7 +1329,10 @@ class MainWindow(QWidget):
                 # 逐段连线（用最近 max_length 帧，deque maxlen）。
                 # 相邻点跳变过大视为「断笔」（手曾离开/漏检又被检出），不连直线，
                 # 避免从画面一端拉一条长线穿越；手回来后的后续点会正常接回。
-                max_jump2 = 0.18 * 0.18  # 归一化距离平方阈值
+                # 阈值放宽到 0.4：手快速画圈/挥手时相邻帧位移较大，阈值太小会让
+                # 轨迹频繁断裂；missing_grace 已在长时间离开后清空队列，
+                # 故放宽不会引入横跨全屏的伪连线。
+                max_jump2 = 0.4 * 0.4  # 归一化距离平方阈值
                 for i in range(1, len(pts_list)):
                     a = pts_list[i - 1]
                     b = pts_list[i]
