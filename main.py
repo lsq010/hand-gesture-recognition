@@ -14,6 +14,7 @@ import time
 import threading
 import tempfile
 import uuid
+from datetime import datetime
 
 import cv2
 
@@ -21,7 +22,7 @@ from PySide6.QtWidgets import (
     QApplication, QWidget, QGroupBox, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QLineEdit, QTextEdit, QTableWidget, QTableWidgetItem,
     QTabWidget, QDialog, QScrollArea, QFrame, QMessageBox,
-    QSizePolicy,
+    QSizePolicy, QFileDialog,
 )
 from PySide6.QtCore import Qt, QTimer, QThread, Signal
 from PySide6.QtGui import QImage, QPixmap, QTextCursor
@@ -875,18 +876,38 @@ class MainWindow(QWidget):
             if not logs:
                 self.statusBar_show("暂无历史记录可导出")
                 return
-            path = os.path.join(os.getcwd(), f"history_{int(time.time())}.csv")
+
+            default_name = f"history_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.csv"
+            path, _ = QFileDialog.getSaveFileName(
+                self,
+                "导出识别历史",
+                os.path.join(os.getcwd(), default_name),
+                "CSV 文件 (*.csv);;所有文件 (*)",
+            )
+            if not path:
+                return
+            if not path.lower().endswith(".csv"):
+                path += ".csv"
+
             with open(path, "w", encoding="utf-8-sig", newline="") as f:
                 w = csv.writer(f)
                 w.writerow(["时间", "手势", "物体", "翻译文本"])
                 for log in logs:
+                    ts = log.get("timestamp", "")
+                    if isinstance(ts, (int, float)):
+                        ts = datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
+                    elif isinstance(ts, str):
+                        ts = ts.strip()
                     w.writerow([
-                        log.get("timestamp", ""),
+                        ts,
                         log.get("gesture_type") or "",
                         log.get("yolo_object") or "",
                         log.get("translation_text") or "",
                     ])
-            self.statusBar_show(f"历史已导出: {path}")
+            self.statusBar_show(
+                f"历史已导出到: {path}；Excel 中若时间列显示 #"
+                "请拖动列宽或双击列分隔线自适应"
+            )
         except Exception as e:  # noqa: BLE001
             self.statusBar_show(f"导出失败: {e}")
 
