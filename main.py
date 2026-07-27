@@ -375,6 +375,7 @@ class MainWindow(QWidget):
         self.current_gestures = []
         self.current_objects = []
         self._running = False
+        self._is_paused = False        # 截图暂停状态：True 时画面冻结，等待保存/继续
         # 含义区是否处于"实时拼接"模式（Kimi 回复覆盖 3 秒后自动回退）
         self._chat_meaning_expire = 0.0  # time.time() 时间戳；0 表示未被 Kimi 覆盖
         self._last_tick = time.time()
@@ -976,9 +977,9 @@ class MainWindow(QWidget):
     def _wire_controls(self):
         self.ui.openCamButton.clicked.connect(self.start_camera)
         self.ui.closeCamButton.clicked.connect(self.stop_camera)
-        self.ui.screenshotButton.clicked.connect(self.save_screenshot)
-        self.ui.saveButton.setEnabled(True)
-        self.ui.saveButton.clicked.connect(self.save_screenshot)
+        self.ui.screenshotButton.clicked.connect(self._on_screenshot_toggle)
+        self.ui.saveButton.setEnabled(False)
+        self.ui.saveButton.clicked.connect(self._on_save_snapshot)
         self.ui.exportButton.clicked.connect(self.export_chat)
     
         self.sendButton.clicked.connect(self.send_chat)
@@ -997,6 +998,10 @@ class MainWindow(QWidget):
         # 立即反馈，避免用户以为程序卡死；UI 不再被初始化阻塞
         self.ui.openCamButton.setEnabled(False)
         self.ui.closeCamButton.setEnabled(True)
+        # 每次重新打开摄像头时重置截图暂停状态
+        self._is_paused = False
+        self.ui.screenshotButton.setText("截图")
+        self.ui.saveButton.setEnabled(False)
         self.statusBar_show("正在打开摄像头…（手势识别即将可用，物体检测/语音后台加载中）")
         # 读取本次会话内的 Key（仅本会话有效，不读 env/db），交给后台线程
         session_key = (getattr(self, "api_key", "") or "").strip().strip('"\'').strip()
@@ -1093,6 +1098,7 @@ class MainWindow(QWidget):
 
     def stop_camera(self):
         self._running = False
+        self._is_paused = False
         self.timer.stop()
         # 游戏进行中关闭摄像头 → 强制结束游戏，避免状态卡在 running
         gc = getattr(self, "game_controller", None)
@@ -1119,6 +1125,10 @@ class MainWindow(QWidget):
             self.ui.openCamButton.setEnabled(True)
         if hasattr(self.ui, "closeCamButton"):
             self.ui.closeCamButton.setEnabled(False)
+        if hasattr(self.ui, "screenshotButton"):
+            self.ui.screenshotButton.setText("截图")
+        if hasattr(self.ui, "saveButton"):
+            self.ui.saveButton.setEnabled(False)
         # 关闭后把实时监测面板恢复成「初始黑屏」状态（不留最后一帧）
         self._clear_live_panel()
 
@@ -1156,7 +1166,9 @@ class MainWindow(QWidget):
     def _tick(self):
         if not self._running:
             return
-    
+        if self._is_paused:
+            return
+
         frame = None
         parsed = {}
         if self.vision is not None:
@@ -1465,18 +1477,73 @@ class MainWindow(QWidget):
             QTimer.singleShot(0, lambda: self.voiceButton.setEnabled(True))
     
     # ------------------------------------------------------------------ #
-    #  数据记录
+    #  数据记录：截图 / 保存 / 导出
     # ------------------------------------------------------------------ #
-    def save_screenshot(self):
-        if self.ui.camLabel.pixmap() is None:
-            self.statusBar_show("暂无画面可截图")
+    def _pause_camera(self):
+        """冻结当前画面，但不释放摄像头。"""
+        if not self._running:
             return
-        path = os.path.join(os.getcwd(), f"snapshot_{int(time.time())}.png")
-        self.ui.camLabel.pixmap().save(path)
-        self.statusBar_show(f"截图已保存: {path}")
-    
+        self._is_paused = True
+        self.timer.stop()
+
+    def _resume_camera(self):
+        """从暂停状态恢复实时画面。"""
+        if not self._running:
+            return
+        self._is_paused = False
+        self.timer.start(33)
+
+    def _on_screenshot_toggle(self):
+        """截图 / 继续 切换按钮。"""
+        if not self._running:
+            self.statusBar_show("请先打开摄像头")
+            return
+        if not self._is_paused:
+            self._pause_camera()
+            self.ui.screenshotButton.setText("继续")
+            self.ui.saveButton.setEnabled(True)
+            self.statusBar_show("画面已暂停，点击「保存」可存图，点击「继续」恢复")
+        else:
+            self._resume_camera()
+            self.ui.screenshotButton.setText("截图")
+            self.ui.saveButton.setEnabled(False)
+            self.statusBar_show("画面已继续")
+
+    def _on_save_snapshot(self):
+        """弹出保存对话框，把当前暂停的画面存为 PNG。"""
+        pixmap = self.ui.camLabel.pixmap()
+        if pixmap is None:
+            self.statusBar_show("暂无画面可保存")
+            return
+        default_name = f"snapshot_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.png"
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "保存截图",
+            os.path.join(os.getcwd(), default_name),
+            "PNG 图片 (*.png);;所有文件 (*)",
+        )
+        if not path:
+            return
+        if not path.lower().endswith(".png"):
+            path += ".png"
+        if pixmap.save(path):
+            self.statusBar_show(f"截图已保存: {path}")
+        else:
+            self.statusBar_show("截图保存失败")
+
     def export_chat(self):
-        path = os.path.join(os.getcwd(), f"chat_log_{int(time.time())}.txt")
+        """弹出保存对话框，导出当前对话记录为 TXT。"""
+        default_name = f"chat_log_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.txt"
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "导出对话记录",
+            os.path.join(os.getcwd(), default_name),
+            "文本文件 (*.txt);;所有文件 (*)",
+        )
+        if not path:
+            return
+        if not path.lower().endswith(".txt"):
+            path += ".txt"
         try:
             with open(path, "w", encoding="utf-8") as f:
                 f.write(self.chatHistory.toPlainText())
