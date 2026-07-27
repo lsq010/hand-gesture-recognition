@@ -342,28 +342,28 @@ DIFFICULTY_LEVELS: list[DifficultyConfig] = [
         description="新手友好：炸弹很少出现，节奏舒缓。",
         lives=5, duration=70, bomb_threshold=8, bomb_prob=0.08,
         spawn_interval_base=1.10, spawn_interval_min=0.70,
-        batch_min=1, batch_max=2, launch_vy_min=-560, launch_vy_max=-420,
+        batch_min=1, batch_max=2, launch_vy_min=-720, launch_vy_max=-540,
     ),
     DifficultyConfig(
         id="normal", name="普通", icon="⚔️",
         description="标准节奏：适度出现炸弹，适合日常娱乐。",
         lives=3, duration=60, bomb_threshold=5, bomb_prob=0.16,
         spawn_interval_base=1.00, spawn_interval_min=0.60,
-        batch_min=1, batch_max=3, launch_vy_min=-680, launch_vy_max=-500,
+        batch_min=1, batch_max=3, launch_vy_min=-880, launch_vy_max=-640,
     ),
     DifficultyConfig(
         id="hard", name="困难", icon="🔥",
         description="节奏更快：炸弹频繁，水果数量更多。",
         lives=3, duration=60, bomb_threshold=3, bomb_prob=0.30,
         spawn_interval_base=0.85, spawn_interval_min=0.45,
-        batch_min=2, batch_max=3, launch_vy_min=-780, launch_vy_max=-580,
+        batch_min=2, batch_max=3, launch_vy_min=-1000, launch_vy_max=-740,
     ),
     DifficultyConfig(
         id="hell", name="地狱", icon="💀",
         description="极限挑战：开局即大量炸弹，稍有不慎就 Game Over！",
         lives=2, duration=60, bomb_threshold=0, bomb_prob=0.48,
         spawn_interval_base=0.70, spawn_interval_min=0.35,
-        batch_min=2, batch_max=4, launch_vy_min=-880, launch_vy_max=-650,
+        batch_min=2, batch_max=4, launch_vy_min=-1080, launch_vy_max=-800,
     ),
 ]
 DEFAULT_DIFFICULTY = "normal"
