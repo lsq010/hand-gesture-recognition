@@ -1485,7 +1485,7 @@ class MainWindow(QWidget):
         self.sendButton.setEnabled(True)
         self.voiceButton.setEnabled(True)
         if self.tts is not None and translated:
-            self.tts.speak(translated, block=False)
+            self.tts.speak(_md_to_plain(translated), block=False)
         # 写入识别历史（数据库 logs 表）
         if HAS_DB and self._pending_log_ctx is not None:
             g_list, o_list = self._pending_log_ctx
@@ -1854,6 +1854,26 @@ def _md_to_html(text: str) -> str:
 
     s = re.sub(r"\x00CODE(\d+)\x00", _restore_code, s)
     return s.replace("\n", "<br>")
+
+
+def _md_to_plain(text: str) -> str:
+    """去掉 Markdown 标记，返回纯文本，供 TTS 朗读。
+
+    避免把 ``**2**`` 里的星号念出来（显示层已用 _md_to_html 渲染，
+    但语音层拿到的是原始文本，必须先清洗）。
+    """
+    s = text or ""
+    # 行内代码 `code` -> code
+    s = re.sub(r"`([^`]+)`", r"\1", s)
+    # 加粗 **...** / __...__
+    s = re.sub(r"\*\*(.+?)\*\*", r"\1", s)
+    s = re.sub(r"__(.+?)__", r"\1", s)
+    # 斜体 *...* / _..._
+    s = re.sub(r"\*(.+?)\*", r"\1", s)
+    s = re.sub(r"_(.+?)_", r"\1", s)
+    # 链接 [text](url) -> text
+    s = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", s)
+    return s.strip()
 
 
 def main():
