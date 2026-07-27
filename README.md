@@ -140,7 +140,6 @@ Windows 用户也可直接双击 `run_gui.bat`。
 
 ```
 hand-gesture-recognition/
-├── docs/                    # 演示 GIF 等文档资源
 ├── main.py                  # 主程序（PySide6 GUI 控制器 / 程序入口，含 CameraInitWorker 两阶段后台初始化线程）
 ├── rec.py                   # UI 代码（由 rec.ui 自动生成，勿手改）
 ├── rec.ui                   # Qt Designer UI 源文件
