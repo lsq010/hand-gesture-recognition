@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
     QSizePolicy,
 )
 from PySide6.QtCore import Qt, QTimer, QThread, Signal
-from PySide6.QtGui import QImage, QPixmap
+from PySide6.QtGui import QImage, QPixmap, QTextCursor
 
 # 复用原有 rec.ui 生成的界面结构
 try:
@@ -1317,10 +1317,18 @@ class MainWindow(QWidget):
         if not self._check_kimi_key_or_prompt():
             return
         self.chatHistory.append(f"<b>你：</b>{_esc(text)}")
+        self.chatHistory.append(
+            "<div style='color:#888; font-size:13px; margin:4px 0;'>"
+            "<span style='font-size:16px;'>🤔</span> <i>Kimi 正在思考…</i>"
+            "</div>"
+        )
+        thinking_cursor = QTextCursor(self.chatHistory.document())
+        thinking_cursor.movePosition(QTextCursor.End)
+        self._thinking_block = thinking_cursor.block()
         self.chatInput.clear()
         self.sendButton.setEnabled(False)
         self.voiceButton.setEnabled(False)
-    
+
         self._worker = ChatWorker(self.llm, text)
         # 捕获发送时刻的上下文，供翻译完成后写入历史（避免完成时被新帧覆盖）
         self._pending_log_ctx = (list(self.current_gestures), list(self.current_objects))
@@ -1329,6 +1337,7 @@ class MainWindow(QWidget):
         self._worker.start()
     
     def _on_chat_done(self, translated, intent):
+        self._remove_chat_thinking()
         self.chatHistory.append(
             f"<b>助手：</b>{_esc(translated)} "
             f"<span style='color:#ffd700;'>[意图: {_esc(intent)}]</span>"
@@ -1357,10 +1366,20 @@ class MainWindow(QWidget):
         self._worker = None
 
     def _on_chat_error(self, msg):
+        self._remove_chat_thinking()
         self.chatHistory.append(f"<span style='color:#ff5555;'>⚠ 错误: {_esc(msg)}</span>")
         self.sendButton.setEnabled(True)
         self.voiceButton.setEnabled(True)
         self._worker = None
+
+    def _remove_chat_thinking(self):
+        """移除聊天历史里的 'Kimi 正在思考…' 占位提示。"""
+        block = getattr(self, "_thinking_block", None)
+        if block is not None and block.isValid():
+            cursor = QTextCursor(block)
+            cursor.select(QTextCursor.BlockUnderCursor)
+            cursor.removeSelectedText()
+        self._thinking_block = None
 
     # ------------------------------------------------------------------ #
     #  含义区：实时拼接 + Kimi 覆盖 3 秒后回退
