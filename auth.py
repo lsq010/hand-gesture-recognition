@@ -336,10 +336,12 @@ class FaceDialog(QDialog):
         face = cv2.resize(face, FACE_SIZE)
         face = self.engine._preprocess(face)
         label, conf = self.engine.predict(face)
-        if label == -1 or conf > CONF_THRESHOLD:
-            self.status.setText(
-                f"人脸登录失败（匹配距离 {conf:.0f}，需 ≤ {CONF_THRESHOLD:.0f}）"
-            )
+        if label == -1:
+            self.status.setText("未找到已注册人员，请先注册")
+            self.status.setStyleSheet("color:#ff7a7a; font-size:13px;")
+            return
+        if conf > CONF_THRESHOLD:
+            self.status.setText("未匹配到已注册人员，请靠近摄像头或调整角度")
             self.status.setStyleSheet("color:#ff7a7a; font-size:13px;")
             return
         user = self.db.get_by_face_label(label)
