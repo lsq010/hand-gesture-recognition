@@ -382,6 +382,8 @@ class MainWindow(QWidget):
         self._fps = 0.0
         self.db_settings = {}          # 从 settings 表加载的配置
         self._pending_log_ctx = None   # 发送时捕获的上下文，供完成后入库
+        self._last_log_sig = None      # 实时识别去重：上一次写入历史的(手势,物体)签名
+        self._last_log_t = 0.0         # 实时识别节流：上一次写入历史的时间戳
 
         self._build_extra_panels()
         self._wire_controls()
@@ -1023,6 +1025,9 @@ class MainWindow(QWidget):
         self._is_paused = False
         self.ui.screenshotButton.setText("截图")
         self.ui.saveButton.setEnabled(False)
+        # 重置实时识别去重基线（新一次开摄像头，历史重新开始累加）
+        self._last_log_sig = None
+        self._last_log_t = 0.0
         self.statusBar_show("正在打开摄像头…（手势识别即将可用，物体检测/语音后台加载中）")
         # 读取本次会话内的 Key（仅本会话有效，不读 env/db），交给后台线程
         session_key = (getattr(self, "api_key", "") or "").strip().strip('"\'').strip()
@@ -1176,6 +1181,8 @@ class MainWindow(QWidget):
         self.current_gestures = []
         self.current_objects = []
         self._pending_log_ctx = None
+        self._last_log_sig = None      # 重置实时识别去重基线
+        self._last_log_t = 0.0
         # 5) 掌心轨迹清空（SequenceTracker 暴露 deque；防止首帧误判 Wave/Circle）
         if self.tracker is not None:
             self.tracker.left_pts.clear()
@@ -1277,6 +1284,9 @@ class MainWindow(QWidget):
         if self._should_use_live_meaning():
             self.ui.meaningLabelValue.setText(live_meaning)
 
+        # ---- 识别历史：识别即记录（去重 + 节流，避免每帧刷重复行）----
+        self._maybe_log_recognition(live_meaning)
+
         # ---- Phase B 恢复：掌心轨迹线 + 动态手势名 ----
         # 游戏进行中：不画手掌/手指轨迹线，只保留切水果的「食指指尖轨迹」
         # （由 game_controller.update_and_draw 绘制），满足「只显示食指最上方画出的线条」。
@@ -1301,6 +1311,42 @@ class MainWindow(QWidget):
         if dt > 0:
             self._fps = 0.9 * self._fps + 0.1 * (1.0 / dt)
         self.statusBar_show(f"实时识别中 | FPS: {self._fps:.1f}")
+
+    # ------------------------------------------------------------------ #
+    #  识别历史：实时监测中识别即记录（去重 + 节流）
+    # ------------------------------------------------------------------ #
+    def _maybe_log_recognition(self, live_meaning):
+        """实时监测里每识别到一个新的手势/物体组合就写入识别历史。
+
+        - 仅当 current_gestures / current_objects 至少有一个非空才记录；
+        - 与上一次写入的(手势,物体)签名相同、且间隔 < 1.5s 时跳过，避免每帧刷重复行；
+        - 含义(live_meaning)一并写入翻译文本列，方便导出查看。
+        """
+        if not HAS_DB:
+            return
+        g = self.current_gestures
+        o = self.current_objects
+        if not g and not o:
+            # 当前没有任何识别结果：重置基线，避免下次一有就立刻当成“新”重复写
+            self._last_log_sig = None
+            return
+        sig = (tuple(g), tuple(o))
+        now = time.time()
+        last_sig = getattr(self, "_last_log_sig", None)
+        last_t = getattr(self, "_last_log_t", 0.0)
+        if sig == last_sig and (now - last_t) < 1.5:
+            return
+        try:
+            insert_log(
+                gesture_type="、".join(g) if g else "无",
+                yolo_object="、".join(o) if o else "无",
+                translation_text=live_meaning or "",
+            )
+            self._last_log_sig = sig
+            self._last_log_t = now
+            QTimer.singleShot(0, self._refresh_history)
+        except Exception as e:  # noqa: BLE001
+            print(f">>> [DB] 实时写入 logs 失败: {e}")
 
     # ------------------------------------------------------------------ #
     #  Phase B 辅助：在 frame 上叠加掌心轨迹线 + 动态手势名
