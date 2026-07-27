@@ -353,8 +353,9 @@ class ChatWorker(QThread):
 
 
 class MainWindow(QWidget):
-    def __init__(self):
+    def __init__(self, username="你"):
         super().__init__()
+        self.username = username or "你"
         if Ui_Form is None:
             raise RuntimeError("rec.Ui_Form 未找到，无法加载界面")
         self.ui = Ui_Form()
@@ -1353,7 +1354,7 @@ class MainWindow(QWidget):
         # === 守卫：未配置有效 Kimi Key 时引导去设置页 ===
         if not self._check_kimi_key_or_prompt():
             return
-        self.chatHistory.append(f"<b>你：</b>{_esc(text)}")
+        self.chatHistory.append(f"<b>{_esc(self.username)}：</b>{_esc(text)}")
         self.chatHistory.append(
             "<div style='color:#888; font-size:13px; margin:4px 0;'>"
             "<span style='font-size:16px;'>🤔</span> <i>Kimi 正在思考…</i>"
@@ -1735,7 +1736,7 @@ def main():
     from PySide6.QtWidgets import QDialog
     auth = AuthWindow()
     if auth.exec() == QDialog.Accepted:
-        win = MainWindow()
+        win = MainWindow(username=auth.logged_in_user or "你")
         win.show()
         sys.exit(app.exec())
     else:

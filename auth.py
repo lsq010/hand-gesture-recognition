@@ -503,6 +503,7 @@ class AuthWindow(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.db = AuthDB()
+        self.logged_in_user = None  # 登录成功后由 _login_ok 写入
         # 启动时用 faces/ 重新训练：确保历史人脸也走 CLAHE 预处理，
         # 与登录时的预处理保持一致（否则新旧模型距离会失真）。无样本则跳过。
         try:
@@ -689,6 +690,7 @@ class AuthWindow(QDialog):
             pass
 
     def _login_ok(self, user):
+        self.logged_in_user = user
         QMessageBox.information(self, "登录成功", f"欢迎回来，{user}！")
         self.accept()
 
