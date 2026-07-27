@@ -14,13 +14,12 @@ import threading
 import tempfile
 import uuid
 
-import numpy as np
 import cv2
 
 from PySide6.QtWidgets import (
     QApplication, QWidget, QGroupBox, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QLineEdit, QTextEdit, QTableWidget, QTableWidgetItem,
-    QTabWidget, QDialog, QDialogButtonBox, QScrollArea, QFrame, QMessageBox,
+    QTabWidget, QDialog, QScrollArea, QFrame, QMessageBox,
     QSizePolicy,
 )
 from PySide6.QtCore import Qt, QTimer, QThread, Signal
@@ -61,7 +60,7 @@ ASRManager = None
 TTSManager = None
 try:
     from database import (
-        init_db, get_all_settings, get_setting, save_setting,
+        init_db, get_all_settings, save_setting,
         insert_log, get_logs, clear_logs, get_signs, insert_sign,
     )
     init_db()  # 幂等建表（logs / settings / sign_dictionary）
@@ -1601,13 +1600,6 @@ class HelpDialog(QDialog):
 def _esc(text):
     """转义 HTML 特殊字符，避免聊天框渲染错乱。"""
     return (text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
-
-
-def _wrap_in_group(title, layout):
-    """把一行布局包成 GroupBox，保持与原有界面一致的卡片风格。"""
-    g = QGroupBox(title)
-    g.setLayout(layout)
-    return g
 
 
 def main():

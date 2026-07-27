@@ -16,17 +16,16 @@ import math
 import random
 import time
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import cv2
 import numpy as np
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
-    QListWidget, QListWidgetItem, QFrame, QSizePolicy, QButtonGroup,
+    QListWidget, QListWidgetItem, QFrame, QButtonGroup,
 )
 from PySide6.QtCore import Qt, QObject, Signal
-from PySide6.QtGui import QFont, QColor
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -89,14 +88,6 @@ def _alpha_blend(frame, overlay, alpha, x=0, y=0):
         res = cv2.addWeighted(ov, alpha, roi, 1 - alpha, 0)
     frame[y1:y2, x1:x2] = res
 
-
-def _circle_alpha(r, color, antialias=True):
-    """生成一个带透明通道的圆形 RGBA 图像。"""
-    d = r * 2 + 5
-    canvas = np.zeros((d, d, 4), dtype=np.uint8)
-    center = d // 2
-    cv2.circle(canvas, (center, center), r, (*color, 255), -1, cv2.LINE_AA if antialias else cv2.LINE_8)
-    return canvas
 
 
 def _radial_gradient_alpha(r, center_color, edge_color):

@@ -133,15 +133,6 @@ def save_setting(key, value, description=None) -> None:
         )
 
 
-def get_setting(key, default=None):
-    """读取一个配置项；不存在时返回 default。"""
-    with _connect() as conn:
-        row = conn.execute(
-            "SELECT value FROM settings WHERE key = ?", (key,)
-        ).fetchone()
-    return row["value"] if row else default
-
-
 def get_all_settings() -> dict:
     """返回全部配置为 {key: value} 字典，便于一次性加载到 UI。"""
     with _connect() as conn:

@@ -16,12 +16,12 @@ import datetime
 
 import cv2
 import numpy as np
-from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QImage, QPixmap, QFont
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import (
-    QApplication, QDialog, QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
+    QApplication, QDialog, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QStackedWidget, QMessageBox,
-    QFrame, QDialogButtonBox,
+    QFrame,
 )
 
 # ── 路径 ────────────────────────────────────────────────────────
