@@ -14,9 +14,6 @@ opencv-contrib-python>=4.8.0
 # Array operations (keep <2.0.0 to avoid conflicts with MediaPipe C extensions)
 numpy>=1.24.0,<2.0.0
 
-# Chinese text rendering (Pillow; used for PIL Chinese overlays in the main app)
-Pillow>=10.0.0
-
 # GUI framework
 PySide6>=6.6.0
 
@@ -38,4 +35,3 @@ faster-whisper
 
 # Live microphone recording (main.py uses sounddevice + wave)
 sounddevice
-python main.py

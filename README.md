@@ -173,7 +173,7 @@ hand-gesture-recognition/
 - **摄像头初始化（两阶段，不再卡）**：点击「打开摄像头」后在 `CameraInitWorker(QThread)` 后台线程运行，拆为两阶段信号——`cam_ready`（阶段1：仅 VisionEngine + MediaPipe，约 1 秒）立即回主线程出画面并启动实时循环；`extras_ready`（阶段2：YOLO-World / whisper / TTS / Kimi）在后台继续加载，就绪后挂上组件。Windows 端摄像头改用 `cv2.CAP_DSHOW` 后端，首帧延迟从数秒降到数百毫秒。UI 主线程全程不冻结。
 - **指向联动**：由手腕关键点 (0) 指向食指尖 (8) 发出射线，与画面中 YOLO 检测框求交，将"用户指着的物体"作为语音/大模型指令的主语，实现自然的"指向 + 说话"组合指令。
 - **图形界面**：PySide6（Qt for Python），`QTimer` 驱动帧循环，避免 `while True` 阻塞 UI。
-- **中文渲染**：PIL（Pillow）绘制中文字体到画面，解决 OpenCV `putText` 不支持中文的问题。
+- **中文渲染**：识别结果的中文通过 PySide6 控件（如 QLabel）展示；画面叠加的英文标识（状态 / 手势缩写）使用 OpenCV `putText`，项目已不再依赖 Pillow/PIL。
 - **大模型接入**：本地算出「手势 + 指向物体 + 语音」的结构化文本描述，只发文字给 Kimi 进行**纯对话交流**（不再只做语句润色，省 token、低延迟），无 Key 时走规则兜底。
 - **🎮 小游戏（切水果）**：`FruitSliceController` 在 `_tick` 帧循环中叠加渲染——水果 / 炸弹从画面底部抛出（按难度调出射速度），用**食指尖（Landmark 8）**在相邻帧间的位移连成切线，与水果 / 炸弹圆形做相交判定切开 / 触发；游戏中 `game_controller.is_running` 时**跳过手掌 / 手指轨迹绘制**，且 `vision_engine.draw_skeleton` 自动置 False 隐藏骨骼线，画面只保留食指指尖切线。难度由 `DifficultyConfig` 定义（生命、时长、炸弹门槛 / 概率、生成间隔、批量、出射速度），经 `main._on_game_start` / `_on_camera_init_done` 传入 `game_controller.start(difficulty)`，难度越高炸弹越频繁（地狱开局即出）。
 - **Key 安全**：API Key 仅存于 `MainWindow.api_key` 内存字段，不写数据库、不读环境变量；启动时清空数据库中残留 Key，保证每次运行"干净"，杜绝泄露 Key 被复用。
