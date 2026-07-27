@@ -63,7 +63,7 @@
 
 - Python **3.9+**
 - Windows / Linux / macOS（需可用摄像头）
-- 联网（首次运行需下载 YOLO-World / CLIP 权重；Kimi 润色需 Moonshot API Key）
+- 联网（首次运行需下载 YOLO-World / CLIP 权重；Kimi 对话需 Moonshot API Key）
 
 ## 安装与运行
 
@@ -96,6 +96,7 @@ pip install -r requirements.txt
 
 - **YOLO-World**：把 `yolov8s-world.pt` 放到项目根目录（已加入 `.gitignore`，不会随仓库提交，请自行保留）。
 - **CLIP 文本编码器**：首次运行物体检测时，`ultralytics` 会自动把 CLIP 权重下载到 `weights/clip/`（同样被 `.gitignore` 忽略，无需手动处理）。
+- **人脸 Haar 模型**：人脸登录检测用的 `haarcascade_frontalface_default.xml` 已随仓库提交在 `haar/` 目录，**无需额外下载**，克隆后直接可用（路径在 `auth.py` 中通过 `SCRIPT_DIR/haar` 相对引用）。
 
 ### 5. 运行
 
@@ -187,6 +188,9 @@ A: 已开启 MediaPipe `max_num_hands=2` 双手检测，并将界面拆为「左
 **Q: 运行报错 `No module named 'cv2'`？**  
 A: 虚拟环境未装依赖，执行 `pip install -r requirements.txt`。
 
+**Q: 人脸登录时报 `cv2 has no attribute 'face'`？**  
+A: 人脸识别用到 OpenCV 的 `cv2.face` 模块，它**只存在于 `opencv-contrib-python`**，普通 `opencv-python` 不含。请确认按本项目 `requirements.txt` 安装（已指定 `opencv-contrib-python`），且**不要同时安装 `opencv-python`**（二者会冲突覆盖，导致 face 模块丢失）。若已误装，重装：`pip uninstall openai opencv-python opencv-contrib-python -y` 后重新 `pip install -r requirements.txt`。
+
 **Q: 出现 `mediapipe has no attribute 'solutions'`？**  
 A: mediapipe 版本过高，执行 `pip install mediapipe==0.10.14`。
 
@@ -203,7 +207,10 @@ A: 在「🎮 小游戏」页右侧难度行选择 🌱简单（5 命 / 炸弹�
 A: 已改为**不自动跳转**——打开摄像头后停留在当前标签页，由你自己点「🎯 实时监测」或「🎮 小游戏」等页面查看画面，使用更自由。
 
 **Q: 启动就让我登录，没账号怎么办？**  
-A: 首次使用请切到「注册」页：填账号 / 密码 / 确认密码 / **人脸编号**（数字，如 1001）→ 点「录入人脸」对着摄像头拍至少 5 张（提示「保存成功」）→ 点「注册」即可。之后即可用密码或人脸登录。人脸数据保存在项目根 `faces/` 目录（`face_<编号>_*.jpg`）与 `trainer.yml`，账号密码以 pbkdf2 加盐哈希存于 `auth.db`，**不存明文**。
+A: 首次使用请切到「注册」页：填账号 / 密码 / 确认密码 / **人脸编号**（数字，如 1001）→ 点「录入人脸」对着摄像头拍至少 5 张（提示「保存成功」）→ 点「注册」即可。之后即可用密码或人脸登录。人脸数据保存在项目根 `faces/` 目录（`face_<编号>_*.jpg`）与 `trainer.yml`，账号密码以 pbkdf2 加盐哈希存于 `auth.db`，**不存明文**。录入过程中若检测到当前人脸此前已注册，会提示「该人脸已被注册（账号名），请勿重复注册」并拒绝保存，避免同一张脸重复注册。
+
+**Q: 注册录入人脸时提示「该人脸已被注册」？**  
+A: 这是**防重复注册**机制：录入阶段会先用已训练的模型比对当前人脸，若匹配到已注册账号即拒绝保存。请换一张未注册的人脸，或用新的**人脸编号**重新注册（不同编号 = 不同账号）。
 
 **Q: 人脸登录识别不出来 / 总失败？**  
 A: 人脸登录依赖项目内 `haar/` 目录下的 Haar 级联检测（`haarcascade_frontalface_default.xml`，已随仓库提交）+ LBPH 识别。注意 LBPH 返回的 `conf` 是**匹配距离（越小越像，0=完美匹配）**，判定通过条件为 距离 ≤ `CONF_THRESHOLD`（当前 **90**）；数值越大说明越不像。识别前已对图像做 **CLAHE 直方图均衡**以减弱光照 / 角度影响。请尽量保证注册与登录时光线、角度接近，录入时拍够 5~15 张、人脸居中清晰。若仍失败，可改用密码登录，或适当调高 `auth.py` 里的 `CONF_THRESHOLD`（放宽匹配、但会降低安全性）。识别成功后界面会显示「识别为 xxx，即将登录…」并停留约 2 秒再进入。

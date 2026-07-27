@@ -24,8 +24,8 @@ PySide6>=6.6.0
 # YOLO-World 物体检测（开放词汇；会随依赖自动安装 torch / torchvision）
 ultralytics
 
-# Kimi / Moonshot 大模型（OpenAI 兼容 API）
-openai
+# Kimi / Moonshot 大模型（OpenAI 兼容 API，代码使用 v1.x 的 client.chat.completions 接口，需 >=1.0.0）
+openai>=1.0.0
 
 # 在线 TTS 语音播报（生成的 mp3 由 pygame mixer 播放）
 edge-tts
