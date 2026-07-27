@@ -26,9 +26,14 @@ from PySide6.QtWidgets import (
 
 # ── 路径 ────────────────────────────────────────────────────────
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-# Haar 级联模型随仓库一起提交（haar/haarcascade_frontalface_default.xml），
-# 用相对路径，保证克隆到任意机器后都能找到。
-HAAR_DIR = os.path.join(SCRIPT_DIR, "haar")
+# Haar 级联模型随仓库一起提交（haar/haarcascade_frontalface_default.xml）。
+# 冻结（PyInstaller）后数据文件随 exe 发布：sys._MEIPASS 指向数据根目录
+# （单文件夹 = exe 所在目录，单文件 = 临时解压目录）；未冻结则用源码目录。
+if getattr(sys, "frozen", False):
+    _RESOURCE_DIR = sys._MEIPASS
+else:
+    _RESOURCE_DIR = SCRIPT_DIR
+HAAR_DIR = os.path.join(_RESOURCE_DIR, "haar")
 HAAR_FACE = os.path.join(HAAR_DIR, "haarcascade_frontalface_default.xml")
 
 AUTH_DB = os.path.join(SCRIPT_DIR, "auth.db")

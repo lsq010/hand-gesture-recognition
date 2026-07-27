@@ -1603,6 +1603,10 @@ def _esc(text):
 
 
 def main():
+    # PyInstaller 冻结后，把工作目录切到 exe 所在目录，
+    # 确保 yolov8s-world.pt / weights/clip/ / check.png 等资源（相对路径基准）能被找到。
+    if getattr(sys, "frozen", False):
+        os.chdir(os.path.dirname(sys.executable))
     app = QApplication(sys.argv)
     # 先弹出登录 / 注册入口；登录成功才进入主程序
     from auth import AuthWindow
