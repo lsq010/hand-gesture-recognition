@@ -523,36 +523,6 @@ class MainWindow(QWidget):
         tab_live_layout.addStretch(1)
         self.rightTabs.addTab(tab_live, "🎯 实时监测")
 
-        # --- Tab 3：📜 识别历史（数据库 logs 表 · 独立一页） ---
-        tab_history = QWidget()
-        tab_history_layout = QVBoxLayout(tab_history)
-        tab_history_layout.setContentsMargins(4, 8, 4, 4)
-        tab_history_layout.setSpacing(8)
-
-        self.historyGroup = QGroupBox("📜 识别历史记录 (数据库)")
-        hist_layout = QVBoxLayout(self.historyGroup)
-        self.historyTable = QTableWidget(0, 4)
-        self.historyTable.setHorizontalHeaderLabels(["时间", "手势", "物体", "翻译文本"])
-        self.historyTable.setStyleSheet(
-            "background-color:#151515; color:#f0f0f0; gridline-color:#333;"
-        )
-        self.historyTable.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.historyTable.setSelectionBehavior(QTableWidget.SelectRows)
-        self.historyTable.horizontalHeader().setStretchLastSection(True)
-        # 自动滚动到底部：默认让最近一次记录可见
-        sb = self.historyTable.verticalScrollBar()
-        sb.setValue(sb.maximum())
-        hist_layout.addWidget(self.historyTable, stretch=1)
-        hist_btn_row = QHBoxLayout()
-        self.refreshHistButton = QPushButton("刷新历史")
-        self.refreshHistButton.clicked.connect(self._refresh_history)
-        hist_btn_row.addWidget(self.refreshHistButton)
-        hist_btn_row.addStretch(1)
-        hist_layout.addLayout(hist_btn_row)
-        tab_history_layout.addWidget(self.historyGroup, stretch=1)
-
-        self.rightTabs.addTab(tab_history, "📜 识别历史")
-
         # --- Tab 4：⚙ 系统设置（控制 / 显示 / 记录） ---
         tab_sys = QWidget()
         tab_sys_layout = QVBoxLayout(tab_sys)
@@ -610,8 +580,6 @@ class MainWindow(QWidget):
 
         # 默认进入「系统设置」Tab；开摄像头时自动切到「实时监测（手势含义）」
         self.rightTabs.setCurrentIndex(3)
-        # 切到「识别历史」Tab 时，自动把表格滚到最底部，让最新一条可见
-        self.rightTabs.currentChanged.connect(self._on_tab_changed)
 
     # ------------------------------------------------------------------ #
     # ------------------------------------------------------------------ #
@@ -668,9 +636,6 @@ class MainWindow(QWidget):
         self.apiKeyEdit.setPlaceholderText(
             "粘贴 Moonshot API Key（仅本会话有效，重启后需重新输入）"
         )
-
-        # 5) 初次刷新历史列表
-        self._refresh_history()
 
     def _check_kimi_key_or_prompt(self) -> bool:
         """Kimi 交流前的 Key 自检。
@@ -844,29 +809,6 @@ class MainWindow(QWidget):
             else:
                 self.statusBar_show("❌ 已取消保存")
 
-    def _refresh_history(self):
-        """从 logs 表读取最近记录并填充历史表格。
-        排序策略：ASC（最旧在表格顶部，最新一条在最后一行），
-        因此表格底部永远是最近一次的识别结果。
-        """
-        if not HAS_DB:
-            return
-        try:
-            logs = get_logs(limit=200, order="ASC")
-        except Exception as e:  # noqa: BLE001
-            print(f">>> [DB] 读取 logs 失败: {e}")
-            return
-        self.historyTable.setRowCount(len(logs))
-        for i, log in enumerate(logs):
-            self.historyTable.setItem(i, 0, QTableWidgetItem(str(log.get("timestamp", ""))))
-            self.historyTable.setItem(i, 1, QTableWidgetItem(str(log.get("gesture_type") or "")))
-            self.historyTable.setItem(i, 2, QTableWidgetItem(str(log.get("yolo_object") or "")))
-            self.historyTable.setItem(i, 3, QTableWidgetItem(str(log.get("translation_text") or "")))
-        self.historyTable.resizeColumnsToContents()
-        self.historyTable.horizontalHeader().setStretchLastSection(True)
-        # 滚到表格底部，让最近一次记录始终可见
-        self.historyTable.scrollToBottom()
-
     def _export_history_csv(self):
         """把全部历史记录导出为 UTF-8-SIG CSV（Excel 友好）。"""
         if not HAS_DB:
@@ -933,23 +875,6 @@ class MainWindow(QWidget):
             self.statusBar_show(f"对话记录已导出: {path}")
         except Exception as e:  # noqa: BLE001
             self.statusBar_show(f"导出失败: {e}")
-
-    def _on_tab_changed(self, index: int):
-        """切到「📜 识别历史」Tab 时，自动把表格滚到最底部。
-
-        这样无论之前在哪个 Tab（Kimi 对话 / 实时监测 / 系统设置），
-        只要用户切到识别历史，第一眼看到的就是最近一次的记录；
-        往上滚即可看到更早的历史。
-        """
-        try:
-            if not hasattr(self, "rightTabs") or not hasattr(self, "historyTable"):
-                return
-            tab_text = self.rightTabs.tabText(index)
-            if "识别历史" in tab_text:
-                # 先刷新一次（确保看到的是最新数据），再滚到底部
-                self._refresh_history()
-        except Exception as e:  # noqa: BLE001
-            print(f">>> [UI] 切换 Tab 时滚动到底部失败: {e}")
 
     # ------------------------------------------------------------------ #
     #  顶部 API Key 告警条（黄色 Alert，绝对不再遮挡数据记录按钮）
@@ -1344,7 +1269,6 @@ class MainWindow(QWidget):
             )
             self._last_log_sig = sig
             self._last_log_t = now
-            QTimer.singleShot(0, self._refresh_history)
         except Exception as e:  # noqa: BLE001
             print(f">>> [DB] 实时写入 logs 失败: {e}")
 
@@ -1460,7 +1384,6 @@ class MainWindow(QWidget):
                     yolo_object="、".join(o_list) if o_list else "无",
                     translation_text=translated or "",
                 )
-                QTimer.singleShot(0, self._refresh_history)
             except Exception as e:  # noqa: BLE001
                 print(f">>> [DB] 写入 logs 失败: {e}")
             self._pending_log_ctx = None
