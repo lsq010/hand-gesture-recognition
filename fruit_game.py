@@ -23,7 +23,7 @@ import numpy as np
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
-    QListWidget, QListWidgetItem, QFrame, QButtonGroup,
+    QListWidget, QListWidgetItem, QFrame, QButtonGroup, QTextBrowser,
 )
 from PySide6.QtCore import Qt, QObject, Signal
 
@@ -855,14 +855,22 @@ class GameHubWidget(QWidget):
         desc_title.setObjectName("descTitle")
         layout.addWidget(desc_title)
 
-        self.descLabel = QLabel("")
+        self.descLabel = QTextBrowser()
         self.descLabel.setObjectName("descBody")
-        self.descLabel.setWordWrap(True)
-        self.descLabel.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+        self.descLabel.setReadOnly(True)
+        self.descLabel.setOpenExternalLinks(False)
+        self.descLabel.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.descLabel.setMinimumHeight(100)
+        self.descLabel.setMaximumHeight(260)
         self.descLabel.setStyleSheet(
-            "background-color: #1a1c2a; border: 1px solid #333; "
-            "border-radius: 6px; padding: 10px; font-size: 13px; color: #ccc;"
+            "QTextBrowser { background-color: #1a1c2a; border: 1px solid #333; "
+            "border-radius: 6px; padding: 8px; font-size: 13px; color: #ccc; }\n"
+            "QTextBrowser QScrollBar:vertical { background: #1a1c2a; width: 10px; "
+            "border-radius: 5px; }\n"
+            "QTextBrowser QScrollBar::handle:vertical { background: #4a9eff; "
+            "border-radius: 5px; min-height: 30px; }\n"
+            "QTextBrowser QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical "
+            "{ height: 0px; }"
         )
         layout.addWidget(self.descLabel)
         self._update_description()
@@ -965,11 +973,13 @@ class GameHubWidget(QWidget):
         if gi is None:
             self.descLabel.setText("暂无游戏")
             return
-        self.descLabel.setText(
+        self.descLabel.setHtml(
+            "<html><body style='color:#ccc;font-size:13px;'>"
             f"<b style='color:#4a9eff;font-size:15px;'>{gi.icon} {gi.name}</b><br><br>"
             f"{gi.description}<br><br>"
             f"<span style='color:#888;'>玩法说明：</span><br>"
             f"<span style='color:#aaa;white-space:pre-wrap;'>{gi.instructions}</span>"
+            "</body></html>"
         )
 
     def _on_start_clicked(self):
